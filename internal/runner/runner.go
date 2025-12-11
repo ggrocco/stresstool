@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -23,6 +24,8 @@ type Metrics struct {
 	LatenciesMutex   sync.Mutex
 	StatusCodes      map[int]int64
 	StatusCodesMutex sync.Mutex
+	Errors           map[string]int64
+	ErrorsMutex      sync.Mutex
 }
 
 // NewMetrics creates a new metrics collector
@@ -30,11 +33,17 @@ func NewMetrics() *Metrics {
 	return &Metrics{
 		Latencies:   make([]time.Duration, 0),
 		StatusCodes: make(map[int]int64),
+		Errors:      make(map[string]int64),
 	}
 }
 
 // AddRequest records a request result
 func (m *Metrics) AddRequest(statusCode int, latency time.Duration, assertionPassed bool) {
+	m.AddRequestWithError(statusCode, latency, assertionPassed, "")
+}
+
+// AddRequestWithError records a request result with an optional error message
+func (m *Metrics) AddRequestWithError(statusCode int, latency time.Duration, assertionPassed bool, errMsg string) {
 	atomic.AddInt64(&m.TotalRequests, 1)
 	
 	m.StatusCodesMutex.Lock()
@@ -44,6 +53,13 @@ func (m *Metrics) AddRequest(statusCode int, latency time.Duration, assertionPas
 	m.LatenciesMutex.Lock()
 	m.Latencies = append(m.Latencies, latency)
 	m.LatenciesMutex.Unlock()
+	
+	// Track error if present
+	if errMsg != "" {
+		m.ErrorsMutex.Lock()
+		m.Errors[errMsg]++
+		m.ErrorsMutex.Unlock()
+	}
 	
 	if statusCode >= 200 && statusCode < 300 {
 		if assertionPassed {
@@ -255,7 +271,11 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics) {
 		var err error
 		bodyStr, err = r.evaluator.Evaluate(bodyStr)
 		if err != nil {
-			metrics.AddRequest(0, 0, false)
+			errMsg := fmt.Sprintf("body placeholder evaluation failed: %v", err)
+			if r.verbose {
+				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+			}
+			metrics.AddRequestWithError(0, 0, false, errMsg)
 			return
 		}
 	}
@@ -268,7 +288,11 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics) {
 	
 	req, err := http.NewRequest(test.Method, test.Path, bodyReader)
 	if err != nil {
-		metrics.AddRequest(0, 0, false)
+		errMsg := fmt.Sprintf("failed to create request: %v", err)
+		if r.verbose {
+			fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+		}
+		metrics.AddRequestWithError(0, 0, false, errMsg)
 		return
 	}
 	
@@ -276,7 +300,11 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics) {
 	for key, value := range test.Headers {
 		evaluatedValue, err := r.evaluator.Evaluate(value)
 		if err != nil {
-			metrics.AddRequest(0, 0, false)
+			errMsg := fmt.Sprintf("header '%s' placeholder evaluation failed: %v", key, err)
+			if r.verbose {
+				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+			}
+			metrics.AddRequestWithError(0, 0, false, errMsg)
 			return
 		}
 		req.Header.Set(key, evaluatedValue)
@@ -288,7 +316,11 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics) {
 	latency := time.Since(startTime)
 	
 	if err != nil {
-		metrics.AddRequest(0, latency, false)
+		errMsg := fmt.Sprintf("HTTP request failed: %v", err)
+		if r.verbose {
+			fmt.Printf("[ERROR] %s: %s (latency: %v)\n", test.Name, errMsg, latency.Round(time.Millisecond))
+		}
+		metrics.AddRequestWithError(0, latency, false, errMsg)
 		return
 	}
 	defer resp.Body.Close()
@@ -300,36 +332,48 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics) {
 	}
 	
 	// Check assertions
-	passed := r.checkAssertions(test.Assert, resp.StatusCode, bodyBytes, latency)
-	metrics.AddRequest(resp.StatusCode, latency, passed)
+	passed, assertionErr := r.checkAssertions(test.Assert, resp.StatusCode, bodyBytes, latency)
+	if !passed && assertionErr != "" {
+		if r.verbose {
+			fmt.Printf("[ASSERTION FAILED] %s: %s (status: %d, latency: %v)\n", 
+				test.Name, assertionErr, resp.StatusCode, latency.Round(time.Millisecond))
+		}
+		metrics.AddRequestWithError(resp.StatusCode, latency, false, assertionErr)
+	} else {
+		if r.verbose && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			fmt.Printf("[OK] %s: status=%d latency=%v\n", 
+				test.Name, resp.StatusCode, latency.Round(time.Millisecond))
+		}
+		metrics.AddRequest(resp.StatusCode, latency, passed)
+	}
 }
 
-// checkAssertions validates all assertions
-func (r *Runner) checkAssertions(assert *config.Assertion, statusCode int, body []byte, latency time.Duration) bool {
+// checkAssertions validates all assertions and returns (passed, errorMessage)
+func (r *Runner) checkAssertions(assert *config.Assertion, statusCode int, body []byte, latency time.Duration) (bool, string) {
 	if assert == nil {
-		return true
+		return true, ""
 	}
 	
 	// Check status code
 	if assert.StatusCode != 0 && statusCode != assert.StatusCode {
-		return false
+		return false, fmt.Sprintf("expected status code %d, got %d", assert.StatusCode, statusCode)
 	}
 	
 	// Check body contains
 	if assert.BodyContains != "" {
 		if !bytes.Contains(body, []byte(assert.BodyContains)) {
-			return false
+			return false, fmt.Sprintf("body does not contain '%s'", assert.BodyContains)
 		}
 	}
 	
 	// Check max latency
 	if assert.MaxLatencyMs > 0 {
 		if latency > time.Duration(assert.MaxLatencyMs)*time.Millisecond {
-			return false
+			return false, fmt.Sprintf("latency %v exceeds max %dms", latency.Round(time.Millisecond), assert.MaxLatencyMs)
 		}
 	}
 	
-	return true
+	return true, ""
 }
 
 // ProgressUpdate represents a progress update during test execution

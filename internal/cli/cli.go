@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -179,6 +180,37 @@ func printSummary(results []*runner.TestResult) {
 		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
 		fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 			metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
+		
+		// Error breakdown
+		metrics.ErrorsMutex.Lock()
+		if len(metrics.Errors) > 0 {
+			fmt.Printf("  Errors:\n")
+			// Sort errors by count (descending)
+			type errorCount struct {
+				err   string
+				count int64
+			}
+			errorList := make([]errorCount, 0, len(metrics.Errors))
+			for err, count := range metrics.Errors {
+				errorList = append(errorList, errorCount{err: err, count: count})
+			}
+			sort.Slice(errorList, func(i, j int) bool {
+				return errorList[i].count > errorList[j].count
+			})
+			
+			// Show top 10 errors
+			maxErrors := 10
+			if len(errorList) < maxErrors {
+				maxErrors = len(errorList)
+			}
+			for i := 0; i < maxErrors; i++ {
+				fmt.Printf("    - %s (count: %d)\n", errorList[i].err, errorList[i].count)
+			}
+			if len(errorList) > maxErrors {
+				fmt.Printf("    ... and %d more error types\n", len(errorList)-maxErrors)
+			}
+		}
+		metrics.ErrorsMutex.Unlock()
 		
 		// Latency metrics
 		min, max, avg := metrics.GetMinMaxAvg()
