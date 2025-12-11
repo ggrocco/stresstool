@@ -1,0 +1,43 @@
+funcs:
+  - name: token
+    cmd: ["echo", "Bearer", "test-token-12345"]
+
+tests:
+  - name: api_login_test
+    path: "https://httpbin.org/post"
+    method: "POST"
+    requests_per_second: 5
+    threads: 2
+    run_seconds: 10
+
+    headers:
+      Authorization: "{{ token() }}"
+      X-Request-Id: "{{ uuid() }}"
+      X-Timestamp: "{{ now() }}"
+      Content-Type: "application/json"
+
+    body: >
+      {
+        "username": "testuser",
+        "timestamp": "{{ now() }}"
+      }
+
+    assert:
+      status_code: 200
+      body_contains: "json"
+      max_latency_ms: 2000
+
+  - name: api_get_test
+    path: "https://httpbin.org/get"
+    method: "GET"
+    requests_per_second: 10
+    threads: 3
+    run_seconds: 5
+
+    headers:
+      X-Request-Id: "{{ uuid() }}"
+
+    assert:
+      status_code: 200
+      max_latency_ms: 1000
+
