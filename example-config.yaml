@@ -25,6 +25,7 @@ tests:
     assert:
       status_code: 200
       body_contains: "json"
+      body_not_equals: "error"
       max_latency_ms: 2000
 
   - name: api_get_test

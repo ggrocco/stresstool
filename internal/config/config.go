@@ -36,9 +36,11 @@ type Test struct {
 
 // Assertion defines what to check in responses
 type Assertion struct {
-	StatusCode   int    `yaml:"status_code"`
-	BodyContains string `yaml:"body_contains"`
-	MaxLatencyMs int    `yaml:"max_latency_ms"`
+	StatusCode    int    `yaml:"status_code"`
+	BodyContains  string `yaml:"body_contains"`
+	BodyEquals    string `yaml:"body_equals"`
+	BodyNotEquals string `yaml:"body_not_equals"`
+	MaxLatencyMs  int    `yaml:"max_latency_ms"`
 }
 
 // LoadConfig reads and parses a YAML configuration file
@@ -119,4 +121,3 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 
 	return strings.TrimSpace(string(output)), nil
 }
-
