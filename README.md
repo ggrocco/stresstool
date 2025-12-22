@@ -123,8 +123,12 @@ Array of HTTP stress tests to execute.
 Defines assertions to validate responses.
 
 - `status_code`: Expected HTTP status code
-- `body_contains`: Substring that must appear in the response body
+- `body_contains`: Substring that must appear in the response body (supports placeholders and custom funcs)
+- `body_equals`: Full response body must match this value exactly (supports placeholders and custom funcs)
+- `body_not_equals`: Full response body must not match this value (supports placeholders and custom funcs)
 - `max_latency_ms`: Maximum allowed latency in milliseconds
+
+Assertion strings are evaluated with the same placeholder engine as headers and bodies, so you can embed expressions like `{{ token() }}` or `{{ js('"ready"') }}`.
 
 ### Placeholders
 
