@@ -13,6 +13,7 @@ var (
 	configFile string
 	verbose    bool
 	dryRun     bool
+	parallel   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -29,12 +30,12 @@ var runCmd = &cobra.Command{
 		if configFile == "" {
 			return fmt.Errorf("config file is required (use -f or --file)")
 		}
-		
-		if err := cli.Run(configFile, verbose, dryRun); err != nil {
+
+		if err := cli.Run(configFile, verbose, dryRun, parallel); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		return nil
 	},
 }
@@ -44,7 +45,8 @@ func init() {
 	runCmd.MarkFlagRequired("file")
 	runCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
 	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate config and show planned tests without executing HTTP calls")
-	
+	runCmd.Flags().BoolVar(&parallel, "parallel", false, "Run all specs in parallel")
+
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -54,4 +56,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

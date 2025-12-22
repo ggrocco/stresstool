@@ -40,6 +40,7 @@ stresstool run -f config.yaml
 - `-f, --file string`: Path to YAML configuration file (required)
 - `--verbose`: Print detailed logs for each request
 - `--dry-run`: Validate configuration and show planned tests without executing HTTP calls
+- `--parallel`: Run all specs in parallel
 
 ### Example
 
@@ -52,6 +53,9 @@ stresstool run -f config.yaml
 
 # Run with verbose output
 stresstool run -f config.yaml --verbose
+
+# Run all specs in parallel
+stresstool run -f config.yaml --parallel
 ```
 
 ## Configuration Format
