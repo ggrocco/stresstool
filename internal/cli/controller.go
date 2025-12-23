@@ -343,15 +343,16 @@ func (c *Controller) waitForCompletion() {
 
 		c.resultsMutex.Lock()
 		allComplete := true
+	checkResults:
 		for nodeName, tests := range expectedResults {
 			for testName := range tests {
 				if _, ok := c.results[nodeName]; !ok {
 					allComplete = false
-					break
+					break checkResults
 				}
 				if _, ok := c.results[nodeName][testName]; !ok {
 					allComplete = false
-					break
+					break checkResults
 				}
 			}
 		}
