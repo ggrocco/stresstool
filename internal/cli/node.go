@@ -198,8 +198,28 @@ func (n *Node) executeTests() error {
 			},
 		}
 
-		if err := n.encoder.Encode(resultMsg); err != nil {
-			fmt.Printf("Failed to send test result: %v\n", err)
+		// Retry sending result with exponential backoff
+		maxRetries := 3
+		var lastErr error
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			if err := n.encoder.Encode(resultMsg); err != nil {
+				lastErr = err
+				if attempt < maxRetries-1 {
+					waitTime := time.Duration(1<<uint(attempt)) * time.Second
+					fmt.Printf("Failed to send test result (attempt %d/%d): %v. Retrying in %v...\n",
+						attempt+1, maxRetries, err, waitTime)
+					time.Sleep(waitTime)
+					continue
+				}
+			} else {
+				lastErr = nil
+				break
+			}
+		}
+
+		if lastErr != nil {
+			return fmt.Errorf("failed to send test result for %s after %d attempts: %w",
+				result.Test.Name, maxRetries, lastErr)
 		}
 	}
 
