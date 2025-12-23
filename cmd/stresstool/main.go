@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"stresstool/internal/cli"
+	"stresstool/internal/security"
 
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,18 @@ var (
 	nodeName       string
 	controllerAddr string
 	listenAddr     string
+
+	// TLS options
+	tlsEnabled       bool
+	tlsCert          string
+	tlsKey           string
+	tlsCA            string
+	tlsClientCert    string
+	tlsClientKey     string
+
+	// Security options
+	allowRemoteCommands bool
+	allowedCommands     []string
 )
 
 var rootCmd = &cobra.Command{
@@ -55,7 +68,34 @@ var nodeCmd = &cobra.Command{
 			return fmt.Errorf("controller address is required (use --controller)")
 		}
 
-		if err := cli.RunNode(nodeName, controllerAddr, verbose); err != nil {
+		// Setup TLS config
+		var tlsCfg *security.TLSConfig
+		if tlsEnabled {
+			tlsCfg = &security.TLSConfig{
+				Enabled:        true,
+				CAFile:         tlsCA,
+				ClientCertFile: tlsClientCert,
+				ClientKeyFile:  tlsClientKey,
+			}
+		}
+
+		// Setup command policy
+		var cmdPolicy *security.CommandPolicy
+		if allowRemoteCommands {
+			if len(allowedCommands) > 0 {
+				cmdPolicy = security.AllowlistPolicy(allowedCommands...)
+			} else {
+				// Allow all commands (backward compatible but unsafe)
+				cmdPolicy = &security.CommandPolicy{
+					AllowRemoteCommands: true,
+					AllowedCommands:     []string{},
+				}
+			}
+		} else {
+			cmdPolicy = security.DefaultSecurePolicy()
+		}
+
+		if err := cli.RunNode(nodeName, controllerAddr, verbose, tlsCfg, cmdPolicy); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -73,7 +113,18 @@ var controllerCmd = &cobra.Command{
 			return fmt.Errorf("config file is required (use -f or --file)")
 		}
 
-		if err := cli.RunController(listenAddr, configFile, parallel, verbose); err != nil {
+		// Setup TLS config
+		var tlsCfg *security.TLSConfig
+		if tlsEnabled {
+			tlsCfg = &security.TLSConfig{
+				Enabled:  true,
+				CertFile: tlsCert,
+				KeyFile:  tlsKey,
+				CAFile:   tlsCA,
+			}
+		}
+
+		if err := cli.RunController(listenAddr, configFile, parallel, verbose, tlsCfg); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -97,6 +148,17 @@ func init() {
 	nodeCmd.Flags().StringVar(&controllerAddr, "controller", "", "Controller address (host:port) to connect to (required)")
 	nodeCmd.MarkFlagRequired("controller")
 	nodeCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
+	
+	// TLS options for node
+	nodeCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS for secure communication")
+	nodeCmd.Flags().StringVar(&tlsCA, "tls-ca", "", "Path to CA certificate file for verifying controller")
+	nodeCmd.Flags().StringVar(&tlsClientCert, "tls-cert", "", "Path to client certificate file for mutual TLS")
+	nodeCmd.Flags().StringVar(&tlsClientKey, "tls-key", "", "Path to client key file for mutual TLS")
+	
+	// Security options for node
+	nodeCmd.Flags().BoolVar(&allowRemoteCommands, "allow-remote-commands", false, "Allow execution of commands from controller config (UNSAFE on untrusted networks)")
+	nodeCmd.Flags().StringSliceVar(&allowedCommands, "allowed-commands", []string{}, "Comma-separated list of allowed command prefixes (e.g., 'echo,/usr/bin/curl')")
+	
 	rootCmd.AddCommand(nodeCmd)
 
 	// Controller command (coordinator)
@@ -105,6 +167,13 @@ func init() {
 	controllerCmd.Flags().StringVar(&listenAddr, "listen", ":8090", "Address for controller to listen on")
 	controllerCmd.Flags().BoolVar(&parallel, "parallel", false, "Run tests in parallel on each node")
 	controllerCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
+	
+	// TLS options for controller
+	controllerCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS for secure communication")
+	controllerCmd.Flags().StringVar(&tlsCert, "tls-cert", "", "Path to server certificate file")
+	controllerCmd.Flags().StringVar(&tlsKey, "tls-key", "", "Path to server key file")
+	controllerCmd.Flags().StringVar(&tlsCA, "tls-ca", "", "Path to CA certificate file for mutual TLS (client verification)")
+	
 	rootCmd.AddCommand(controllerCmd)
 }
 

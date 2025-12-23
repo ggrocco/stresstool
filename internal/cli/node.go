@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"stresstool/internal/placeholders"
 	"stresstool/internal/protocol"
 	"stresstool/internal/runner"
+	"stresstool/internal/security"
 )
 
 // Node represents a worker node that executes tests
@@ -19,6 +21,8 @@ type Node struct {
 	nodeName       string
 	controllerAddr string
 	verbose        bool
+	tlsConfig      *security.TLSConfig
+	cmdPolicy      *security.CommandPolicy
 
 	conn    net.Conn
 	encoder *json.Encoder
@@ -29,7 +33,7 @@ type Node struct {
 }
 
 // RunNode starts a node and connects to the controller
-func RunNode(nodeName, controllerAddr string, verbose bool) error {
+func RunNode(nodeName, controllerAddr string, verbose bool, tlsCfg *security.TLSConfig, cmdPolicy *security.CommandPolicy) error {
 	if nodeName == "" {
 		return fmt.Errorf("node name is required")
 	}
@@ -37,10 +41,27 @@ func RunNode(nodeName, controllerAddr string, verbose bool) error {
 		return fmt.Errorf("controller address is required")
 	}
 
+	// Default to secure policy if not specified
+	if cmdPolicy == nil {
+		cmdPolicy = security.DefaultSecurePolicy()
+		fmt.Println("⚠️  Using default security policy: remote command execution is DISABLED")
+	}
+
+	// Warn if TLS is not enabled
+	if tlsCfg == nil || !tlsCfg.Enabled {
+		fmt.Println("⚠️  WARNING: TLS is not enabled. Communication is unencrypted and unauthenticated.")
+		fmt.Println("   This mode should only be used on trusted networks.")
+		fmt.Println("   Received configs may contain arbitrary commands or sensitive data.\n")
+	} else {
+		fmt.Println("✓ TLS enabled for secure communication")
+	}
+
 	node := &Node{
 		nodeName:       nodeName,
 		controllerAddr: controllerAddr,
 		verbose:        verbose,
+		tlsConfig:      tlsCfg,
+		cmdPolicy:      cmdPolicy,
 	}
 
 	return node.start()
@@ -48,9 +69,24 @@ func RunNode(nodeName, controllerAddr string, verbose bool) error {
 
 func (n *Node) start() error {
 	// Connect to controller
-	conn, err := net.Dial("tcp", n.controllerAddr)
-	if err != nil {
-		return fmt.Errorf("failed to connect to controller at %s: %w", n.controllerAddr, err)
+	var conn net.Conn
+	var err error
+
+	if n.tlsConfig != nil && n.tlsConfig.Enabled {
+		tlsConf, err := security.LoadClientTLSConfig(n.tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS config: %w", err)
+		}
+
+		conn, err = tls.Dial("tcp", n.controllerAddr, tlsConf)
+		if err != nil {
+			return fmt.Errorf("failed to connect to controller at %s with TLS: %w", n.controllerAddr, err)
+		}
+	} else {
+		conn, err = net.Dial("tcp", n.controllerAddr)
+		if err != nil {
+			return fmt.Errorf("failed to connect to controller at %s: %w", n.controllerAddr, err)
+		}
 	}
 	defer conn.Close()
 
@@ -108,6 +144,17 @@ func (n *Node) handleMessages() error {
 }
 
 func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
+	// Validate commands in config against policy
+	for _, funcDef := range spec.Config.Funcs {
+		if err := n.cmdPolicy.ValidateCommand(funcDef.Cmd); err != nil {
+			fmt.Printf("⚠️  SECURITY: Rejecting config due to unauthorized command: %v\n", err)
+			fmt.Printf("   Function: %s, Command: %v\n", funcDef.Name, funcDef.Cmd)
+			fmt.Println("   The controller attempted to send a config with commands that are not allowed.")
+			fmt.Println("   This could be a security issue. Check controller configuration.")
+			return
+		}
+	}
+
 	n.config = spec.Config.WithNodeOverrides(spec.NodeName)
 	n.parallel = spec.Parallel
 
@@ -117,6 +164,9 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 	}
 
 	fmt.Printf("Received test specification with %d test(s)\n", len(n.config.Tests))
+	if len(spec.Config.Funcs) > 0 {
+		fmt.Printf("✓ Validated %d custom function(s) against security policy\n", len(spec.Config.Funcs))
+	}
 	if n.verbose {
 		for _, test := range n.config.Tests {
 			fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",

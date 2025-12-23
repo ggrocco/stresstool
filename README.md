@@ -191,6 +191,138 @@ The controller and nodes communicate using JSON messages over TCP:
 6. **TestResult**: Node sends final test results
 7. **Complete**: Controller signals all tests are done
 
+## Security Considerations
+
+⚠️ **IMPORTANT: The distributed mode has significant security implications that must be understood before use.**
+
+### Threat Model
+
+When using distributed mode (controller + nodes), be aware that:
+
+1. **Configuration Data Exposure**: The controller sends the complete test configuration (including authorization headers, API keys, and custom command definitions) to all connected nodes over the network.
+
+2. **Command Execution Risk**: Test configurations can include custom functions (`funcs`) that execute arbitrary operating system commands. If nodes accept configs from untrusted controllers, an attacker could:
+   - Execute arbitrary commands on worker nodes
+   - Exfiltrate sensitive data or credentials
+   - Compromise the security of the worker systems
+
+3. **Network Attacks**: Without TLS and mutual authentication:
+   - Man-in-the-middle attacks can intercept sensitive data
+   - Attackers can impersonate controllers or nodes
+   - All communication is sent in plaintext
+
+### Security Recommendations
+
+#### 1. Use TLS with Mutual Authentication (Strongly Recommended)
+
+**Always enable TLS with mutual authentication for production environments:**
+
+```bash
+# Generate certificates (example using OpenSSL)
+# 1. Create CA
+openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
+  -keyout ca-key.pem -out ca-cert.pem \
+  -subj "/CN=StressTool CA"
+
+# 2. Create controller certificate
+openssl req -newkey rsa:4096 -nodes \
+  -keyout controller-key.pem -out controller-req.pem \
+  -subj "/CN=controller"
+openssl x509 -req -in controller-req.pem -days 365 \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out controller-cert.pem
+
+# 3. Create node certificates (repeat for each node)
+openssl req -newkey rsa:4096 -nodes \
+  -keyout node-key.pem -out node-req.pem \
+  -subj "/CN=node1"
+openssl x509 -req -in node-req.pem -days 365 \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out node-cert.pem
+```
+
+**Start controller with TLS:**
+```bash
+./stresstool controller -f config.yaml --listen :8090 \
+  --tls \
+  --tls-cert controller-cert.pem \
+  --tls-key controller-key.pem \
+  --tls-ca ca-cert.pem
+```
+
+**Start nodes with TLS:**
+```bash
+./stresstool node --node-name node1 --controller controller:8090 \
+  --tls \
+  --tls-ca ca-cert.pem \
+  --tls-cert node-cert.pem \
+  --tls-key node-key.pem
+```
+
+#### 2. Restrict Command Execution on Nodes
+
+**Default Behavior (Secure)**: Nodes reject any configuration containing custom functions by default.
+
+**To allow specific commands** (use with caution):
+```bash
+# Allow only specific safe commands
+./stresstool node --node-name node1 --controller controller:8090 \
+  --allow-remote-commands \
+  --allowed-commands "echo,/usr/bin/date,/usr/bin/curl"
+```
+
+**To allow all commands** (UNSAFE - only on fully trusted networks):
+```bash
+./stresstool node --node-name node1 --controller controller:8090 \
+  --allow-remote-commands
+```
+
+#### 3. Network Isolation
+
+- **Use a dedicated private network** or VPN for controller-node communication
+- **Implement firewall rules** to restrict access to controller ports
+- **Never expose the controller** directly to the public internet
+- **Use network segmentation** to isolate stress testing infrastructure
+
+#### 4. Credential Management
+
+- **Avoid embedding secrets** in config files when possible
+- **Use environment variables** or secure secret management systems
+- **Rotate credentials** regularly
+- **Audit who has access** to config files and certificates
+
+### Security Warning Messages
+
+When TLS is disabled, you'll see:
+```
+⚠️  WARNING: TLS is not enabled. Communication is unencrypted and unauthenticated.
+   This mode should only be used on trusted networks.
+   Secrets in config (headers, auth tokens) will be sent in plaintext.
+```
+
+When remote commands are blocked, you'll see:
+```
+⚠️  SECURITY: Rejecting config due to unauthorized command
+   The controller attempted to send a config with commands that are not allowed.
+```
+
+### Best Practices Summary
+
+✅ **DO:**
+- Always use TLS with mutual authentication in production
+- Use the default secure command policy (block remote commands)
+- Run on isolated, trusted networks
+- Regularly audit and rotate certificates
+- Keep sensitive configs protected
+
+❌ **DON'T:**
+- Use unencrypted mode over untrusted networks
+- Allow arbitrary remote command execution
+- Expose controller ports to the internet
+- Share certificates across environments
+- Store plaintext secrets in config files
+
+
 ## Benefits of Distributed Mode
 
 1. **Higher Load**: Distribute load across multiple machines to test at scale

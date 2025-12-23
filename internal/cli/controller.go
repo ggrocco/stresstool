@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"stresstool/internal/config"
 	"stresstool/internal/protocol"
 	"stresstool/internal/runner"
+	"stresstool/internal/security"
 )
 
 // Controller manages test execution across multiple nodes
@@ -21,6 +23,7 @@ type Controller struct {
 	config     *config.Config
 	parallel   bool
 	verbose    bool
+	tlsConfig  *security.TLSConfig
 
 	nodesMutex sync.Mutex
 	nodes      map[string]*NodeConnection
@@ -42,7 +45,7 @@ type NodeConnection struct {
 }
 
 // RunController starts the controller and waits for nodes to connect
-func RunController(listenAddr, configFile string, parallel, verbose bool) error {
+func RunController(listenAddr, configFile string, parallel, verbose bool, tlsCfg *security.TLSConfig) error {
 	// Load configuration
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
@@ -53,11 +56,22 @@ func RunController(listenAddr, configFile string, parallel, verbose bool) error 
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Warn if TLS is not enabled
+	if tlsCfg == nil || !tlsCfg.Enabled {
+		fmt.Println("⚠️  WARNING: TLS is not enabled. Communication is unencrypted and unauthenticated.")
+		fmt.Println("   This mode should only be used on trusted networks.")
+		fmt.Println("   Secrets in config (headers, auth tokens) will be sent in plaintext.")
+		fmt.Println("   See documentation for enabling TLS with mutual authentication.\n")
+	} else {
+		fmt.Println("✓ TLS enabled for secure communication")
+	}
+
 	ctrl := &Controller{
 		listenAddr: listenAddr,
 		config:     cfg,
 		parallel:   parallel,
 		verbose:    verbose,
+		tlsConfig:  tlsCfg,
 		nodes:      make(map[string]*NodeConnection),
 		progress:   make(map[string]map[string]*protocol.ProgressMessage),
 		results:    make(map[string]map[string]*runner.TestResult),
@@ -67,9 +81,25 @@ func RunController(listenAddr, configFile string, parallel, verbose bool) error 
 }
 
 func (c *Controller) start() error {
-	ln, err := net.Listen("tcp", c.listenAddr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", c.listenAddr, err)
+	var ln net.Listener
+	var err error
+
+	// Load TLS config if enabled
+	if c.tlsConfig != nil && c.tlsConfig.Enabled {
+		tlsConf, err := security.LoadServerTLSConfig(c.tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS config: %w", err)
+		}
+
+		ln, err = tls.Listen("tcp", c.listenAddr, tlsConf)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s with TLS: %w", c.listenAddr, err)
+		}
+	} else {
+		ln, err = net.Listen("tcp", c.listenAddr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", c.listenAddr, err)
+		}
 	}
 	defer ln.Close()
 
