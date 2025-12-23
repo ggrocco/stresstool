@@ -61,9 +61,9 @@ type ProgressMessage struct {
 
 // TestResultMessage contains the final result of a test
 type TestResultMessage struct {
-	NodeName string              `json:"node_name"`
-	TestName string              `json:"test_name"`
-	Result   *runner.TestResult  `json:"result"`
+	NodeName string             `json:"node_name"`
+	TestName string             `json:"test_name"`
+	Result   *runner.TestResult `json:"result"`
 }
 
 // ReadyMessage indicates node is ready to receive tests

@@ -105,7 +105,7 @@ func (c *Controller) start() error {
 
 	// Simple input handler - wait for "start" command
 	fmt.Println("\nType 'start' when ready to begin tests, or 'nodes' to see connected nodes:")
-	
+
 	for {
 		select {
 		case conn := <-connChan:
