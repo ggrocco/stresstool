@@ -15,6 +15,11 @@ import (
 	"stresstool/internal/runner"
 )
 
+const (
+	// timeoutBufferSeconds is the buffer added to the longest test duration to calculate the overall timeout
+	timeoutBufferSeconds = 60
+)
+
 // Controller manages test execution across multiple nodes
 type Controller struct {
 	listenAddr string
@@ -345,8 +350,8 @@ func (c *Controller) waitForCompletion() {
 			maxTestDuration = test.RunSeconds
 		}
 	}
-	// Add 60 seconds buffer for test setup and result reporting
-	timeout := time.Duration(maxTestDuration+60) * time.Second
+	// Add buffer for test setup and result reporting
+	timeout := time.Duration(maxTestDuration+timeoutBufferSeconds) * time.Second
 	startTime := time.Now()
 
 	// Poll for completion
@@ -361,15 +366,21 @@ func (c *Controller) waitForCompletion() {
 		}
 
 		// Update expected results to exclude disconnected nodes
+		var disconnectedNodes []string
 		c.nodesMutex.Lock()
 		for nodeName := range expectedResults {
 			if _, stillConnected := c.nodes[nodeName]; !stillConnected {
 				// Node has disconnected, remove from expected results
 				delete(expectedResults, nodeName)
-				fmt.Printf("\n⚠ Warning: Node %s disconnected during test execution\n", nodeName)
+				disconnectedNodes = append(disconnectedNodes, nodeName)
 			}
 		}
 		c.nodesMutex.Unlock()
+
+		// Print warnings for disconnected nodes outside the mutex lock
+		for _, nodeName := range disconnectedNodes {
+			fmt.Printf("\n⚠ Warning: Node %s disconnected during test execution\n", nodeName)
+		}
 
 		// Check if all expected results from currently connected nodes are received
 		c.resultsMutex.Lock()
