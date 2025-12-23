@@ -31,6 +31,9 @@ type Controller struct {
 
 	resultsMutex sync.Mutex
 	results      map[string]map[string]*runner.TestResult
+	
+	errorsMutex sync.Mutex
+	nodeErrors  map[string]*protocol.ErrorMessage // Track nodes that encountered errors
 }
 
 // NodeConnection represents a connected node
@@ -61,6 +64,7 @@ func RunController(listenAddr, configFile string, parallel, verbose bool) error 
 		nodes:      make(map[string]*NodeConnection),
 		progress:   make(map[string]map[string]*protocol.ProgressMessage),
 		results:    make(map[string]map[string]*runner.TestResult),
+		nodeErrors: make(map[string]*protocol.ErrorMessage),
 	}
 
 	return ctrl.start()
@@ -199,6 +203,14 @@ func (c *Controller) handleNodeMessages(nodeName string, decoder *json.Decoder) 
 			if c.verbose {
 				fmt.Printf("Node %s is ready\n", nodeName)
 			}
+			
+		case protocol.MsgTypeError:
+			errorData, err := parseMessageData[protocol.ErrorMessage](msg.Data)
+			if err != nil {
+				fmt.Printf("Failed to parse error message: %v\n", err)
+				continue
+			}
+			c.handleNodeError(errorData)
 		}
 	}
 }
@@ -245,6 +257,16 @@ func (c *Controller) handleTestResult(result *protocol.TestResultMessage) {
 	if c.verbose {
 		fmt.Printf("Received result from %s for test %s\n", result.NodeName, result.TestName)
 	}
+}
+
+func (c *Controller) handleNodeError(errorMsg *protocol.ErrorMessage) {
+	c.errorsMutex.Lock()
+	defer c.errorsMutex.Unlock()
+	
+	c.nodeErrors[errorMsg.NodeName] = errorMsg
+	
+	fmt.Printf("✗ Error from node %s during %s: %s\n", 
+		errorMsg.NodeName, errorMsg.Phase, errorMsg.Error)
 }
 
 func (c *Controller) printConnectedNodes() {
@@ -341,10 +363,23 @@ func (c *Controller) waitForCompletion() {
 	for {
 		time.Sleep(1 * time.Second)
 
+		// Check which nodes have errors (outside the results lock)
+		c.errorsMutex.Lock()
+		failedNodes := make(map[string]bool)
+		for nodeName := range c.nodeErrors {
+			failedNodes[nodeName] = true
+		}
+		c.errorsMutex.Unlock()
+
 		c.resultsMutex.Lock()
 		allComplete := true
 	checkResults:
 		for nodeName, tests := range expectedResults {
+			// Skip nodes that encountered errors
+			if failedNodes[nodeName] {
+				continue
+			}
+			
 			for testName := range tests {
 				if _, ok := c.results[nodeName]; !ok {
 					allComplete = false
@@ -378,8 +413,12 @@ func (c *Controller) printFinalSummary() {
 
 	c.resultsMutex.Lock()
 	defer c.resultsMutex.Unlock()
+	c.errorsMutex.Lock()
+	defer c.errorsMutex.Unlock()
 
 	allPassed := true
+	
+	// Print results from successful nodes
 	for nodeName, tests := range c.results {
 		fmt.Printf("\n=== Node: %s ===\n", nodeName)
 		for testName, result := range tests {
@@ -389,6 +428,19 @@ func (c *Controller) printFinalSummary() {
 				allPassed = false
 			}
 		}
+	}
+	
+	// Print errors from failed nodes
+	if len(c.nodeErrors) > 0 {
+		fmt.Println("\n" + strings.Repeat("=", 80))
+		fmt.Println("NODE ERRORS")
+		fmt.Println(strings.Repeat("=", 80))
+		for nodeName, errorMsg := range c.nodeErrors {
+			fmt.Printf("\n=== Node: %s ===\n", nodeName)
+			fmt.Printf("Phase: %s\n", errorMsg.Phase)
+			fmt.Printf("Error: %s\n", errorMsg.Error)
+		}
+		allPassed = false
 	}
 
 	fmt.Println("\n" + strings.Repeat("=", 80))

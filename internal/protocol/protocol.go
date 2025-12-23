@@ -23,6 +23,8 @@ const (
 	MsgTypeReady MessageType = "ready"
 	// Controller -> All Nodes: Signal that all tests are complete
 	MsgTypeComplete MessageType = "complete"
+	// Node -> Controller: Error during node operation
+	MsgTypeError MessageType = "error"
 )
 
 // Message is the base message structure
@@ -72,4 +74,11 @@ type ReadyMessage struct {
 // StartTestsMessage signals nodes to begin execution
 type StartTestsMessage struct {
 	Timestamp int64 `json:"timestamp"`
+}
+
+// ErrorMessage indicates an error occurred on the node
+type ErrorMessage struct {
+	NodeName string `json:"node_name"`
+	Error    string `json:"error"`
+	Phase    string `json:"phase"` // e.g., "validation", "execution"
 }
