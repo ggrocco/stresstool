@@ -21,13 +21,13 @@ sleep 2
 
 # Start node-a in background
 echo "Starting node-a..."
-NODE_NAME=node-a ./stresstool node --node-name node-a --controller localhost:8090 > node-a.log 2>&1 &
+./stresstool node --node-name node-a --controller localhost:8090 > node-a.log 2>&1 &
 NODE_A_PID=$!
 sleep 1
 
 # Start node-b in background
 echo "Starting node-b..."
-NODE_NAME=node-b ./stresstool node --node-name node-b --controller localhost:8090 > node-b.log 2>&1 &
+./stresstool node --node-name node-b --controller localhost:8090 > node-b.log 2>&1 &
 NODE_B_PID=$!
 sleep 1
 
