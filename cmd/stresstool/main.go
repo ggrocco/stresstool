@@ -28,8 +28,10 @@ var (
 	tlsClientKey     string
 
 	// Security options
-	allowRemoteCommands bool
-	allowedCommands     []string
+	allowRemoteCommands       bool
+	allowedCommands           []string
+	unsafeAllowAllCommands    bool
+	tlsServerName             string
 )
 
 var rootCmd = &cobra.Command{
@@ -76,6 +78,7 @@ var nodeCmd = &cobra.Command{
 				CAFile:         tlsCA,
 				ClientCertFile: tlsClientCert,
 				ClientKeyFile:  tlsClientKey,
+				ServerName:     tlsServerName,
 			}
 		}
 
@@ -84,12 +87,17 @@ var nodeCmd = &cobra.Command{
 		if allowRemoteCommands {
 			if len(allowedCommands) > 0 {
 				cmdPolicy = security.AllowlistPolicy(allowedCommands...)
-			} else {
+			} else if unsafeAllowAllCommands {
 				// Allow all commands (backward compatible but unsafe)
+				// Requires explicit flag to enable
+				fmt.Println("⚠️  WARNING: Allowing ALL remote commands without restrictions!")
+				fmt.Println("   This is UNSAFE and should only be used on fully trusted networks.")
 				cmdPolicy = &security.CommandPolicy{
 					AllowRemoteCommands: true,
 					AllowedCommands:     []string{},
 				}
+			} else {
+				return fmt.Errorf("--allow-remote-commands requires either --allowed-commands or --unsafe-allow-all-commands")
 			}
 		} else {
 			cmdPolicy = security.DefaultSecurePolicy()
@@ -154,10 +162,12 @@ func init() {
 	nodeCmd.Flags().StringVar(&tlsCA, "tls-ca", "", "Path to CA certificate file for verifying controller")
 	nodeCmd.Flags().StringVar(&tlsClientCert, "tls-cert", "", "Path to client certificate file for mutual TLS")
 	nodeCmd.Flags().StringVar(&tlsClientKey, "tls-key", "", "Path to client key file for mutual TLS")
+	nodeCmd.Flags().StringVar(&tlsServerName, "tls-server-name", "", "Expected server name for certificate verification")
 	
 	// Security options for node
-	nodeCmd.Flags().BoolVar(&allowRemoteCommands, "allow-remote-commands", false, "Allow execution of commands from controller config (UNSAFE on untrusted networks)")
+	nodeCmd.Flags().BoolVar(&allowRemoteCommands, "allow-remote-commands", false, "Allow execution of commands from controller config (requires --allowed-commands or --unsafe-allow-all-commands)")
 	nodeCmd.Flags().StringSliceVar(&allowedCommands, "allowed-commands", []string{}, "Comma-separated list of allowed command prefixes (e.g., 'echo,/usr/bin/curl')")
+	nodeCmd.Flags().BoolVar(&unsafeAllowAllCommands, "unsafe-allow-all-commands", false, "UNSAFE: Allow all commands without restrictions (only for trusted networks)")
 	
 	rootCmd.AddCommand(nodeCmd)
 

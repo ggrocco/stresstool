@@ -21,6 +21,8 @@ type TLSConfig struct {
 	ClientCertFile string
 	// ClientKeyFile is the path to the client key (for nodes)
 	ClientKeyFile string
+	// ServerName is the expected server name for certificate validation (for nodes)
+	ServerName string
 }
 
 // LoadServerTLSConfig creates a TLS config for the controller (server)
@@ -71,6 +73,11 @@ func LoadClientTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS13, // Require TLS 1.3
+	}
+
+	// Set ServerName for certificate verification
+	if cfg.ServerName != "" {
+		tlsConfig.ServerName = cfg.ServerName
 	}
 
 	// If CA is specified, use it to verify server certificate

@@ -144,6 +144,13 @@ func (n *Node) handleMessages() error {
 }
 
 func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
+	// SECURITY NOTE: Command validation happens after receiving the config.
+	// This means if the config contains sensitive data along with unauthorized commands,
+	// that data has already been transmitted. For maximum security:
+	// 1. Use TLS to encrypt the channel
+	// 2. Only connect to trusted controllers
+	// 3. Use the default secure policy to block all remote commands
+	
 	// Validate commands in config against policy
 	for _, funcDef := range spec.Config.Funcs {
 		if err := n.cmdPolicy.ValidateCommand(funcDef.Cmd); err != nil {

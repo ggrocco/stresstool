@@ -34,8 +34,14 @@ func (p *CommandPolicy) ValidateCommand(cmdParts []string) error {
 	// Check if command is in allowlist
 	cmd := cmdParts[0]
 	for _, allowed := range p.AllowedCommands {
-		// Exact match or prefix match
-		if cmd == allowed || strings.HasPrefix(cmd, allowed+"/") {
+		// Exact match only - prevent prefix bypass attacks
+		if cmd == allowed {
+			return nil
+		}
+		// Also allow if the command is within an allowed directory path
+		// e.g., allowed="/usr/bin/curl" matches cmd="/usr/bin/curl"
+		// but does NOT match cmd="/usr/bin/curlfoo"
+		if strings.HasPrefix(cmd, allowed+"/") {
 			return nil
 		}
 	}
