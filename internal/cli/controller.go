@@ -308,19 +308,17 @@ func (c *Controller) startTests() error {
 		},
 	}
 
-	for nodeName, node := range nodesWithSpec {
-		// Verify node is still connected before sending
+	for nodeName := range nodesWithSpec {
+		// Verify node is still connected and send start signal atomically
 		c.nodesMutex.Lock()
-		_, stillConnected := c.nodes[nodeName]
-		c.nodesMutex.Unlock()
-
-		if stillConnected {
+		if node, stillConnected := c.nodes[nodeName]; stillConnected {
 			if err := node.Encoder.Encode(startMsg); err != nil {
 				fmt.Printf("Failed to send start signal to %s: %v\n", nodeName, err)
 			}
 		} else {
 			fmt.Printf("Node %s disconnected before receiving start signal\n", nodeName)
 		}
+		c.nodesMutex.Unlock()
 	}
 
 	// Wait for all tests to complete
