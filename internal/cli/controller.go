@@ -311,6 +311,18 @@ func (c *Controller) startTests() error {
 	// Print final summary
 	c.printFinalSummary()
 
+	// Notify all nodes that the test run is complete so they can disconnect
+	c.nodesMutex.Lock()
+	completeMsg := protocol.Message{
+		Type: protocol.MsgTypeComplete,
+		Data: nil,
+	}
+	for nodeName, node := range c.nodes {
+		if err := node.Encoder.Encode(completeMsg); err != nil {
+			fmt.Printf("Failed to send complete signal to %s: %v\n", nodeName, err)
+		}
+	}
+	c.nodesMutex.Unlock()
 	return nil
 }
 
