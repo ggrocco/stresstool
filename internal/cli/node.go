@@ -113,6 +113,20 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 
 	if err := n.config.Validate(); err != nil {
 		fmt.Printf("Config validation failed: %v\n", err)
+		
+		// Send error message to controller
+		errorMsg := protocol.Message{
+			Type: protocol.MsgTypeError,
+			Data: protocol.ErrorMessage{
+				NodeName: n.nodeName,
+				Error:    err.Error(),
+				Phase:    "validation",
+			},
+		}
+		
+		if encErr := n.encoder.Encode(errorMsg); encErr != nil {
+			fmt.Printf("Failed to send error message: %v\n", encErr)
+		}
 		return
 	}
 
