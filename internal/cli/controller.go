@@ -267,7 +267,9 @@ func (c *Controller) startTests() error {
 
 	fmt.Printf("\nStarting tests on %d node(s)...\n\n", len(c.nodes))
 
-	// Track nodes that successfully received the test spec
+	// Track nodes that successfully received the test spec.
+	// This map is built while holding nodesMutex and is safe to read
+	// without the mutex later because it's immutable after this phase.
 	nodesWithSpec := make(map[string]*NodeConnection)
 
 	// Send test spec to each node
