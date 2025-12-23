@@ -351,12 +351,19 @@ func (c *Controller) waitForCompletion() {
 	for {
 		time.Sleep(1 * time.Second)
 
-		c.resultsMutex.Lock()
+		// Check which nodes have errors (outside the results lock)
 		c.errorsMutex.Lock()
+		failedNodes := make(map[string]bool)
+		for nodeName := range c.nodeErrors {
+			failedNodes[nodeName] = true
+		}
+		c.errorsMutex.Unlock()
+
+		c.resultsMutex.Lock()
 		allComplete := true
 		for nodeName, tests := range expectedResults {
 			// Skip nodes that encountered errors
-			if _, hasError := c.nodeErrors[nodeName]; hasError {
+			if failedNodes[nodeName] {
 				continue
 			}
 			
@@ -371,7 +378,6 @@ func (c *Controller) waitForCompletion() {
 				}
 			}
 		}
-		c.errorsMutex.Unlock()
 		c.resultsMutex.Unlock()
 
 		if allComplete {
@@ -393,8 +399,8 @@ func (c *Controller) printFinalSummary() {
 	fmt.Println(strings.Repeat("=", 80))
 
 	c.resultsMutex.Lock()
-	c.errorsMutex.Lock()
 	defer c.resultsMutex.Unlock()
+	c.errorsMutex.Lock()
 	defer c.errorsMutex.Unlock()
 
 	allPassed := true
