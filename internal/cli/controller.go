@@ -15,6 +15,11 @@ import (
 	"stresstool/internal/runner"
 )
 
+const (
+	// timeoutBufferSeconds is the buffer added to the longest test duration to calculate the overall timeout
+	timeoutBufferSeconds = 60
+)
+
 // Controller manages test execution across multiple nodes
 type Controller struct {
 	listenAddr string
@@ -337,10 +342,47 @@ func (c *Controller) waitForCompletion() {
 	}
 	c.nodesMutex.Unlock()
 
+	// Set a timeout to prevent infinite waiting
+	// Timeout is based on longest test duration plus some buffer
+	maxTestDuration := 0
+	for _, test := range c.config.Tests {
+		if test.RunSeconds > maxTestDuration {
+			maxTestDuration = test.RunSeconds
+		}
+	}
+	// Add buffer for test setup and result reporting
+	timeout := time.Duration(maxTestDuration+timeoutBufferSeconds) * time.Second
+	startTime := time.Now()
+
 	// Poll for completion
 	for {
 		time.Sleep(1 * time.Second)
 
+		// Check for timeout
+		if time.Since(startTime) > timeout {
+			fmt.Printf("\n⚠ Warning: Test execution timeout reached after %v\n", timeout)
+			fmt.Println("Some nodes may have disconnected or tests are taking longer than expected")
+			break
+		}
+
+		// Update expected results to exclude disconnected nodes
+		var disconnectedNodes []string
+		c.nodesMutex.Lock()
+		for nodeName := range expectedResults {
+			if _, stillConnected := c.nodes[nodeName]; !stillConnected {
+				// Node has disconnected, remove from expected results
+				delete(expectedResults, nodeName)
+				disconnectedNodes = append(disconnectedNodes, nodeName)
+			}
+		}
+		c.nodesMutex.Unlock()
+
+		// Print warnings for disconnected nodes outside the mutex lock
+		for _, nodeName := range disconnectedNodes {
+			fmt.Printf("\n⚠ Warning: Node %s disconnected during test execution\n", nodeName)
+		}
+
+		// Check if all expected results from currently connected nodes are received
 		c.resultsMutex.Lock()
 		allComplete := true
 	checkResults:
@@ -359,6 +401,12 @@ func (c *Controller) waitForCompletion() {
 		c.resultsMutex.Unlock()
 
 		if allComplete {
+			break
+		}
+
+		// If no nodes remain connected, exit early
+		if len(expectedResults) == 0 {
+			fmt.Println("\n⚠ Warning: All nodes disconnected during test execution")
 			break
 		}
 	}
