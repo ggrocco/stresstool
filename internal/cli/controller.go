@@ -267,6 +267,9 @@ func (c *Controller) startTests() error {
 
 	fmt.Printf("\nStarting tests on %d node(s)...\n\n", len(c.nodes))
 
+	// Track nodes that successfully received the test spec
+	nodesWithSpec := make(map[string]*NodeConnection)
+
 	// Send test spec to each node
 	for nodeName, node := range c.nodes {
 		spec := protocol.TestSpecMessage{
@@ -282,15 +285,22 @@ func (c *Controller) startTests() error {
 
 		if err := node.Encoder.Encode(msg); err != nil {
 			fmt.Printf("Failed to send test spec to %s: %v\n", nodeName, err)
+		} else {
+			// Only track nodes that successfully received the spec
+			nodesWithSpec[nodeName] = node
 		}
 	}
 	c.nodesMutex.Unlock()
 
+	// Check if any nodes received the spec
+	if len(nodesWithSpec) == 0 {
+		return fmt.Errorf("failed to send test spec to any nodes")
+	}
+
 	// Wait a bit for nodes to prepare
 	time.Sleep(500 * time.Millisecond)
 
-	// Send start signal
-	c.nodesMutex.Lock()
+	// Send start signal only to nodes that received the test spec
 	startMsg := protocol.Message{
 		Type: protocol.MsgTypeStartTests,
 		Data: protocol.StartTestsMessage{
@@ -298,12 +308,20 @@ func (c *Controller) startTests() error {
 		},
 	}
 
-	for nodeName, node := range c.nodes {
-		if err := node.Encoder.Encode(startMsg); err != nil {
-			fmt.Printf("Failed to send start signal to %s: %v\n", nodeName, err)
+	for nodeName, node := range nodesWithSpec {
+		// Verify node is still connected before sending
+		c.nodesMutex.Lock()
+		_, stillConnected := c.nodes[nodeName]
+		c.nodesMutex.Unlock()
+
+		if stillConnected {
+			if err := node.Encoder.Encode(startMsg); err != nil {
+				fmt.Printf("Failed to send start signal to %s: %v\n", nodeName, err)
+			}
+		} else {
+			fmt.Printf("Node %s disconnected before receiving start signal\n", nodeName)
 		}
 	}
-	c.nodesMutex.Unlock()
 
 	// Wait for all tests to complete
 	c.waitForCompletion()
