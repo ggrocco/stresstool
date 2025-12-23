@@ -337,10 +337,41 @@ func (c *Controller) waitForCompletion() {
 	}
 	c.nodesMutex.Unlock()
 
+	// Set a timeout to prevent infinite waiting
+	// Timeout is based on longest test duration plus some buffer
+	maxTestDuration := 0
+	for _, test := range c.config.Tests {
+		if test.RunSeconds > maxTestDuration {
+			maxTestDuration = test.RunSeconds
+		}
+	}
+	// Add 60 seconds buffer for test setup and result reporting
+	timeout := time.Duration(maxTestDuration+60) * time.Second
+	startTime := time.Now()
+
 	// Poll for completion
 	for {
 		time.Sleep(1 * time.Second)
 
+		// Check for timeout
+		if time.Since(startTime) > timeout {
+			fmt.Printf("\n⚠ Warning: Test execution timeout reached after %v\n", timeout)
+			fmt.Println("Some nodes may have disconnected or tests are taking longer than expected")
+			break
+		}
+
+		// Update expected results to exclude disconnected nodes
+		c.nodesMutex.Lock()
+		for nodeName := range expectedResults {
+			if _, stillConnected := c.nodes[nodeName]; !stillConnected {
+				// Node has disconnected, remove from expected results
+				delete(expectedResults, nodeName)
+				fmt.Printf("\n⚠ Warning: Node %s disconnected during test execution\n", nodeName)
+			}
+		}
+		c.nodesMutex.Unlock()
+
+		// Check if all expected results from currently connected nodes are received
 		c.resultsMutex.Lock()
 		allComplete := true
 	checkResults:
@@ -359,6 +390,12 @@ func (c *Controller) waitForCompletion() {
 		c.resultsMutex.Unlock()
 
 		if allComplete {
+			break
+		}
+
+		// If no nodes remain connected, exit early
+		if len(expectedResults) == 0 {
+			fmt.Println("\n⚠ Warning: All nodes disconnected during test execution")
 			break
 		}
 	}
