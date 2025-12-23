@@ -134,6 +134,10 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 
 	if err := n.encoder.Encode(readyMsg); err != nil {
 		fmt.Printf("Failed to send ready message: %v\n", err)
+		if n.conn != nil {
+			_ = n.conn.Close()
+		}
+		return
 	}
 
 	fmt.Println("Ready to start tests. Waiting for start signal...")
