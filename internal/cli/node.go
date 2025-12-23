@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
@@ -159,8 +158,10 @@ func (n *Node) executeTests() error {
 	// Progress channel
 	progressChan := make(chan runner.ProgressUpdate, 100)
 
-	// Start progress reporter
-	go n.reportProgress(progressChan)
+	// Start progress reporter with WaitGroup for proper synchronization
+	var progressWg sync.WaitGroup
+	progressWg.Add(1)
+	go n.reportProgress(progressChan, &progressWg)
 
 	// Run tests
 	results := make([]*runner.TestResult, len(n.config.Tests))
@@ -185,7 +186,7 @@ func (n *Node) executeTests() error {
 	}
 
 	close(progressChan)
-	time.Sleep(100 * time.Millisecond) // Allow final progress update
+	progressWg.Wait() // Wait for progress reporter to finish processing all messages
 
 	// Send results to controller
 	for _, result := range results {
@@ -208,7 +209,8 @@ func (n *Node) executeTests() error {
 	return nil
 }
 
-func (n *Node) reportProgress(progressChan <-chan runner.ProgressUpdate) {
+func (n *Node) reportProgress(progressChan <-chan runner.ProgressUpdate, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for update := range progressChan {
 		// Send to controller
 		progressMsg := protocol.Message{
