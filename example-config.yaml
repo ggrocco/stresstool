@@ -28,6 +28,13 @@ tests:
       body_not_equals: "error"
       max_latency_ms: 2000
 
+    nodes:
+      node-a:
+        requests_per_second: 3
+        threads: 1
+      node-b:
+        requests_per_second: 8
+
   - name: api_get_test
     path: "https://httpbin.org/get"
     method: "GET"

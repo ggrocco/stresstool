@@ -1,81 +1,156 @@
-# stresstool
+# Distributed Stress Testing Tool
 
-A command-line HTTP stress test tool written in Go that reads YAML configuration files and executes concurrent HTTP requests with assertions.
+A flexible HTTP stress testing tool that supports both standalone and distributed execution modes.
 
-## Features
+## Architecture Overview
 
-- **YAML-Driven Configuration**: Define tests in a simple YAML format
-- **Dynamic Placeholders**: Use JavaScript functions and custom CLI commands to generate dynamic values
-- **Concurrent Execution**: Configurable worker threads and requests per second
-- **Real-time Progress**: Live progress indicators showing RPS, requests, and failures
-- **Assertions**: Validate status codes, response body content, and latency thresholds
-- **Comprehensive Metrics**: Min/max/avg latency, percentiles (P95, P99), and detailed statistics
+The tool has been refactored to support a **Controller-Node** architecture for distributed load testing:
 
-## Installation
+### Components
 
-### Build from Source
+1. **Controller**: 
+   - Loads the test configuration file
+   - Waits for worker nodes to connect
+   - Distributes test specifications to all connected nodes
+   - Coordinates test execution start
+   - Aggregates and displays results from all nodes
 
-```bash
-git clone <repository-url>
-cd stresstool
-go build -o stresstool ./cmd/stresstool
-```
+2. **Node (Worker)**:
+   - Connects to the controller
+   - Receives test specifications
+   - Executes tests with node-specific overrides
+   - Reports progress and results back to the controller
 
-### Install Globally
-
-```bash
-go install ./cmd/stresstool
-```
+3. **Standalone Mode**:
+   - Traditional single-instance execution
+   - No network communication required
 
 ## Usage
 
-### Basic Usage
+### 1. Standalone Mode (Single Machine)
+
+Run tests directly without distribution:
 
 ```bash
-stresstool run -f config.yaml
+./stresstool run -f config.yaml
 ```
 
-### Flags
+Options:
+- `-f, --file`: Path to YAML configuration file (required)
+- `--verbose`: Print detailed logs
+- `--dry-run`: Validate config without executing tests
+- `--parallel`: Run all tests in parallel
 
-- `-f, --file string`: Path to YAML configuration file (required)
-- `--verbose`: Print detailed logs for each request
-- `--dry-run`: Validate configuration and show planned tests without executing HTTP calls
-- `--parallel`: Run all specs in parallel
+### 2. Distributed Mode (Controller + Nodes)
 
-### Example
+#### Step 1: Start the Controller
 
 ```bash
-# Validate configuration
-stresstool run -f config.yaml --dry-run
-
-# Run stress tests
-stresstool run -f config.yaml
-
-# Run with verbose output
-stresstool run -f config.yaml --verbose
-
-# Run all specs in parallel
-stresstool run -f config.yaml --parallel
+./stresstool controller -f config.yaml --listen :8090
 ```
 
-## Configuration Format
+The controller will:
+- Load the configuration
+- Listen for node connections
+- Wait for your command to start tests
 
-### YAML Structure
+Options:
+- `-f, --file`: Path to YAML configuration file (required)
+- `--listen`: Address to listen on (default: `:8090`)
+- `--parallel`: Run tests in parallel on each node
+- `--verbose`: Print detailed logs
+
+#### Step 2: Start Worker Nodes
+
+On each worker machine, run:
+
+```bash
+# Node A
+./stresstool node --node-name node-a --controller controller-host:8090
+
+# Node B
+./stresstool node --node-name node-b --controller controller-host:8090
+
+# Node C
+./stresstool node --node-name node-c --controller controller-host:8090
+```
+
+Each node will:
+- Connect to the controller
+- Identify itself by name
+- Wait for test specifications
+
+Options:
+- `--node-name`: Unique name for this node (required)
+- `--controller`: Controller address to connect to (required)
+- `--verbose`: Print detailed logs
+
+#### Step 3: Start Tests from Controller
+
+Once all nodes are connected, type `start` in the controller terminal:
+
+```
+Type 'start' when ready to begin tests, or 'nodes' to see connected nodes:
+> nodes
+Connected nodes (3):
+  - node-a
+  - node-b
+  - node-c
+
+> start
+Starting tests on 3 node(s)...
+```
+
+The controller will:
+1. Send test specifications to all nodes
+2. Signal nodes to start simultaneously
+3. Display real-time progress from all nodes
+4. Aggregate and display final results
+
+## Configuration
+
+### Node-Specific Overrides
+
+You can configure different load parameters for specific nodes in your YAML config:
+
+```yaml
+tests:
+  - name: api_load_test
+    path: "https://api.example.com/endpoint"
+    method: "POST"
+    requests_per_second: 100  # Default for all nodes
+    threads: 10               # Default for all nodes
+    run_seconds: 60
+    
+    # Node-specific overrides
+    nodes:
+      node-a:
+        requests_per_second: 50
+        threads: 5
+      node-b:
+        requests_per_second: 150
+        threads: 15
+      node-c:
+        requests_per_second: 100
+        # Uses default threads: 10
+```
+
+### Example Configuration
+
+See `example-config.yaml` for a complete example:
 
 ```yaml
 funcs:
   - name: token
-    cmd: ["./cli/token", "arg1", "arg2"]
-  - name: generateId
-    cmd: ["node", "scripts/generate.js"]
+    cmd: ["echo", "Bearer", "test-token-12345"]
 
 tests:
   - name: api_login_test
-    path: "https://api.example.com/login"
+    path: "https://httpbin.org/post"
     method: "POST"
-    requests_per_second: 10
-    threads: 4
-    run_seconds: 300
+    requests_per_second: 5
+    threads: 2
+    run_seconds: 10
 
     headers:
       Authorization: "{{ token() }}"
@@ -85,148 +160,115 @@ tests:
 
     body: >
       {
-        "username": "user@example.com",
-        "password": "secret123"
+        "username": "testuser",
+        "timestamp": "{{ now() }}"
       }
 
     assert:
       status_code: 200
-      body_contains: "success"
-      max_latency_ms: 500
+      body_contains: "json"
+      max_latency_ms: 2000
+
+    nodes:
+      node-a:
+        requests_per_second: 3
+        threads: 1
+      node-b:
+        requests_per_second: 8
 ```
 
-### Configuration Fields
+## Communication Protocol
 
-#### `funcs` (optional)
+The controller and nodes communicate using JSON messages over TCP:
 
-Array of custom functions that can be called via placeholders.
+### Message Types
 
-- `name`: Function identifier used in placeholders (e.g., `{{ token() }}`)
-- `cmd`: Array of strings executed as a subprocess; stdout is captured and used as the return value
+1. **Hello**: Node announces itself to controller
+2. **TestSpec**: Controller sends test configuration to node
+3. **Ready**: Node confirms it's ready to start
+4. **StartTests**: Controller signals all nodes to begin
+5. **Progress**: Node sends real-time progress updates
+6. **TestResult**: Node sends final test results
+7. **Complete**: Controller signals all tests are done
 
-#### `tests` (required)
+## Benefits of Distributed Mode
 
-Array of HTTP stress tests to execute.
+1. **Higher Load**: Distribute load across multiple machines to test at scale
+2. **Geographic Distribution**: Run nodes in different regions to test from multiple locations
+3. **Node Specialization**: Configure different load profiles per node
+4. **Centralized Control**: Single point to coordinate and monitor all tests
+5. **Aggregated Results**: View combined results from all nodes in one place
 
-- `name`: Test identifier (optional but recommended)
-- `path`: Full URL to hit (required)
-- `method`: HTTP method (default: "GET")
-- `requests_per_second`: Target requests per second (required, must be > 0)
-- `threads`: Number of concurrent worker threads (required, must be > 0)
-- `run_seconds`: Total duration to run the test in seconds (required, must be > 0)
-- `headers`: Map of HTTP headers (may include placeholders)
-- `body`: Request body string (may include placeholders)
-- `assert`: Assertion configuration (see below)
+## Example Distributed Test Scenario
 
-#### `assert` (optional)
+```bash
+# Terminal 1: Start Controller
+./stresstool controller -f load-test.yaml --listen :8090
 
-Defines assertions to validate responses.
+# Terminal 2: Node in US-East
+./stresstool node --node-name us-east --controller localhost:8090
 
-- `status_code`: Expected HTTP status code
-- `body_contains`: Substring that must appear in the response body (supports placeholders and custom funcs)
-- `body_equals`: Full response body must match this value exactly (supports placeholders and custom funcs)
-- `body_not_equals`: Full response body must not match this value (supports placeholders and custom funcs)
-- `max_latency_ms`: Maximum allowed latency in milliseconds
+# Terminal 3: Node in US-West
+./stresstool node --node-name us-west --controller localhost:8090
 
-Assertion strings are evaluated with the same placeholder engine as headers and bodies, so you can embed expressions like `{{ token() }}` or `{{ js('"ready"') }}`.
+# Terminal 4: Node in EU
+./stresstool node --node-name eu-central --controller localhost:8090
 
-### Placeholders
+# Back to Terminal 1: Check nodes and start
+> nodes
+Connected nodes (3):
+  - us-east
+  - us-west
+  - eu-central
 
-Placeholders are delimited by double curly braces and are evaluated per request.
-
-#### Built-in Functions
-
-- `{{ now() }}`: Current timestamp as ISO 8601 string
-- `{{ uuid() }}`: Randomly generated UUID string
-- `{{ js("new Date().getTime()") }}`: Execute arbitrary JavaScript code
-
-#### Custom Functions
-
-Custom functions defined in `funcs` can be called:
-
-```yaml
-funcs:
-  - name: token
-    cmd: ["./scripts/get-token.sh"]
-
-tests:
-  - name: test
-    headers:
-      Authorization: "Bearer {{ token() }}"
+> start
 ```
 
-#### JavaScript Evaluation
+The controller will coordinate all three nodes to execute tests simultaneously, with each node applying its specific configuration overrides.
 
-You can execute JavaScript expressions:
+## Monitoring
 
-```yaml
-headers:
-  X-Timestamp: "{{ js('Date.now().toString()') }}"
-  X-Random: "{{ js('Math.random().toString(36)') }}"
-```
+### Real-Time Progress
 
-## Example Output
-
-### During Execution
+During test execution, the controller displays live updates from all nodes:
 
 ```
-→ api_login_test: 45s elapsed - 450 requests, 10.0 RPS, 2 failures
-→ api_search_test: 30s elapsed - 300 requests, 10.0 RPS, 0 failures
+→ us-east / api_login_test: 5s elapsed - 25 requests, 5.0 RPS, 0 failures
+→ us-west / api_login_test: 5s elapsed - 40 requests, 8.0 RPS, 1 failures
+→ eu-central / api_login_test: 5s elapsed - 15 requests, 3.0 RPS, 0 failures
 ```
 
-### Final Summary
+### Final Results
+
+After all tests complete, view aggregated metrics per node:
 
 ```
-================================================================================
-TEST SUMMARY
-================================================================================
-
+=== Node: us-east ===
 Test: api_login_test
-  Path: POST https://api.example.com/login
-  Duration: 300s
-  Requests: 3000 total, 2998 success, 2 failures
-  Latency:
-    Min: 45ms
-    Avg: 120ms
-    Max: 450ms
-    P95: 250ms
-    P99: 380ms
-  Assertions:
-    Status Code 200: ✓ PASSED
-    Body Contains 'success': ✓ PASSED
-    Max Latency 500ms: ✓ PASSED
+  Requests: 50 total, 50 success, 0 failures
+  Latency: Min: 45ms, Avg: 123ms, Max: 456ms, P95: 234ms, P99: 345ms
   Result: ✓ PASSED
 
-================================================================================
-OVERALL RESULT: ✓ ALL TESTS PASSED
-================================================================================
+=== Node: us-west ===
+...
 ```
 
-## Exit Codes
+## Build from Source
 
-- `0`: All tests passed
-- `1`: One or more tests failed or an error occurred
+```bash
+git clone <repository-url>
+cd stresstool
+go build -o stresstool ./cmd/stresstool
+```
 
-## Error Handling
+### Install Globally
+```bash
+go install ./cmd/stresstool
+```
 
-- Configuration validation errors are reported before execution
-- Invalid placeholders cause immediate failure
-- Failed function executions (custom `funcs`) are treated as request failures
-- Network errors and timeouts are tracked as failures
-- Assertion failures are reported in the summary
+## Architecture Benefits
 
-## Best Practices
-
-1. **Start Small**: Begin with low RPS and short durations to validate your configuration
-2. **Use Dry-Run**: Always validate your config with `--dry-run` before running tests
-3. **Monitor Resources**: Ensure your target server can handle the load
-4. **Set Realistic Assertions**: Use appropriate latency thresholds based on your infrastructure
-5. **Custom Functions**: Keep custom function execution time short to avoid rate limiting issues
-
-## Limitations
-
-- Response bodies are limited to 1MB for assertion checking
-- Custom function execution has a 30-second timeout
-- JavaScript evaluation uses the goja engine (ECMAScript 5.1 compatible)
-
-
+- **Separation of Concerns**: Controller handles coordination, nodes handle execution
+- **Scalability**: Add more nodes to increase load capacity
+- **Flexibility**: Mix standalone and distributed modes as needed
+- **Observability**: Centralized progress monitoring and result aggregation

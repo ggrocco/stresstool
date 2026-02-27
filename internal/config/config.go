@@ -32,6 +32,13 @@ type Test struct {
 	Headers           map[string]string `yaml:"headers"`
 	Body              string            `yaml:"body"`
 	Assert            *Assertion        `yaml:"assert"`
+	Nodes             map[string]Node   `yaml:"nodes"`
+}
+
+// Node allows overriding settings for a specific node name
+type Node struct {
+	RequestsPerSecond int `yaml:"requests_per_second"`
+	Threads           int `yaml:"threads"`
 }
 
 // Assertion defines what to check in responses
@@ -92,6 +99,15 @@ func (c *Config) Validate() error {
 		if test.Method == "" {
 			c.Tests[i].Method = "GET"
 		}
+
+		for nodeName, nodeCfg := range test.Nodes {
+			if nodeCfg.RequestsPerSecond < 0 {
+				return fmt.Errorf("test[%d].nodes[%s]: requests_per_second must be >= 0", i, nodeName)
+			}
+			if nodeCfg.Threads < 0 {
+				return fmt.Errorf("test[%d].nodes[%s]: threads must be >= 0", i, nodeName)
+			}
+		}
 	}
 
 	return nil
@@ -120,4 +136,29 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+// WithNodeOverrides returns a copy of the config with node-specific overrides applied
+func (c *Config) WithNodeOverrides(nodeName string) *Config {
+	if nodeName == "" {
+		return c
+	}
+
+	newConfig := *c
+	newConfig.Tests = make([]Test, len(c.Tests))
+
+	for i, test := range c.Tests {
+		updated := test
+		if nodeCfg, ok := test.Nodes[nodeName]; ok {
+			if nodeCfg.Threads > 0 {
+				updated.Threads = nodeCfg.Threads
+			}
+			if nodeCfg.RequestsPerSecond > 0 {
+				updated.RequestsPerSecond = nodeCfg.RequestsPerSecond
+			}
+		}
+		newConfig.Tests[i] = updated
+	}
+
+	return &newConfig
 }
