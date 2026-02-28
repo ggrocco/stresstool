@@ -452,22 +452,6 @@ func (c *Controller) printFinalSummary() {
 	fmt.Println(strings.Repeat("=", 80))
 }
 
-// Helper function to parse message data
-func parseMessageData[T any](data interface{}) (*T, error) {
-	// Convert via JSON to handle map[string]interface{} from decoder
-	bytes, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-
-	var result T
-	if err := json.Unmarshal(bytes, &result); err != nil {
-		return nil, err
-	}
-
-	return &result, nil
-}
-
 func printTestResult(result *runner.TestResult) {
 	test := result.Test
 	metrics := result.Metrics
