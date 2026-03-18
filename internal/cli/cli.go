@@ -32,6 +32,7 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 
 	// Create evaluator
 	eval := placeholders.NewEvaluator(cfg)
+	defer eval.Close()
 
 	// Create runner
 	r := runner.NewRunner(eval, verbose)
@@ -118,6 +119,7 @@ func dryRunValidation(cfg *config.Config) error {
 
 	// Validate placeholders
 	eval := placeholders.NewEvaluator(cfg)
+	defer eval.Close()
 	fmt.Println("\n=== Placeholder Validation ===")
 
 	for _, test := range cfg.Tests {
@@ -198,8 +200,7 @@ func printSummary(results []*runner.TestResult) {
 		fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 			metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
 
-		// Error breakdown
-		metrics.ErrorsMutex.Lock()
+		// Error breakdown (safe to read directly — metrics.Stop() already called)
 		if len(metrics.Errors) > 0 {
 			fmt.Printf("  Errors:\n")
 			// Sort errors by count (descending)
@@ -227,7 +228,6 @@ func printSummary(results []*runner.TestResult) {
 				fmt.Printf("    ... and %d more error types\n", len(errorList)-maxErrors)
 			}
 		}
-		metrics.ErrorsMutex.Unlock()
 
 		// Latency metrics
 		min, max, avg := metrics.GetMinMaxAvg()
@@ -264,13 +264,11 @@ func printSummary(results []*runner.TestResult) {
 			if test.Assert.MaxLatencyMs > 0 {
 				fmt.Printf("    Max Latency %dms: ", test.Assert.MaxLatencyMs)
 				violations := int64(0)
-				metrics.LatenciesMutex.Lock()
 				for _, lat := range metrics.Latencies {
 					if lat > time.Duration(test.Assert.MaxLatencyMs)*time.Millisecond {
 						violations++
 					}
 				}
-				metrics.LatenciesMutex.Unlock()
 				if violations == 0 {
 					fmt.Println("✓ PASSED")
 				} else {

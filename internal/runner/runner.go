@@ -134,6 +134,7 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 	time.Sleep(time.Duration(test.RunSeconds) * time.Second)
 	close(stopChan)
 	wg.Wait()
+	metrics.Stop() // drain and close the metrics channel before reading results
 
 	// Final progress update
 	elapsed := time.Since(startTime)
