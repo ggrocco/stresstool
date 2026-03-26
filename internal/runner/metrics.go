@@ -2,10 +2,17 @@ package runner
 
 import (
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// metricEvent represents a single request result sent to the aggregator
+type metricEvent struct {
+	statusCode      int
+	latency         time.Duration
+	assertionPassed bool
+	errMsg          string
+}
 
 // Metrics holds statistics for a test run
 type Metrics struct {
@@ -14,20 +21,42 @@ type Metrics struct {
 	FailureCount      int64
 	AssertionFailures int64
 	Latencies         []time.Duration
-	LatenciesMutex    sync.Mutex
 	StatusCodes       map[int]int64
-	StatusCodesMutex  sync.Mutex
 	Errors            map[string]int64
-	ErrorsMutex       sync.Mutex
+
+	metricsChan   chan metricEvent
+	aggregateDone chan struct{}
 }
 
-// NewMetrics creates a new metrics collector
+// NewMetrics creates a new metrics collector and starts the aggregator goroutine
 func NewMetrics() *Metrics {
-	return &Metrics{
-		Latencies:   make([]time.Duration, 0),
-		StatusCodes: make(map[int]int64),
-		Errors:      make(map[string]int64),
+	m := &Metrics{
+		Latencies:     make([]time.Duration, 0),
+		StatusCodes:   make(map[int]int64),
+		Errors:        make(map[string]int64),
+		metricsChan:   make(chan metricEvent, 1000),
+		aggregateDone: make(chan struct{}),
 	}
+	go m.aggregate()
+	return m
+}
+
+// aggregate is the single goroutine that owns and updates Latencies, StatusCodes, and Errors
+func (m *Metrics) aggregate() {
+	for event := range m.metricsChan {
+		m.StatusCodes[event.statusCode]++
+		m.Latencies = append(m.Latencies, event.latency)
+		if event.errMsg != "" {
+			m.Errors[event.errMsg]++
+		}
+	}
+	close(m.aggregateDone)
+}
+
+// Stop closes the metrics channel and waits for the aggregator to drain all events
+func (m *Metrics) Stop() {
+	close(m.metricsChan)
+	<-m.aggregateDone
 }
 
 // AddRequest records a request result
@@ -39,21 +68,6 @@ func (m *Metrics) AddRequest(statusCode int, latency time.Duration, assertionPas
 func (m *Metrics) AddRequestWithError(statusCode int, latency time.Duration, assertionPassed bool, errMsg string) {
 	atomic.AddInt64(&m.TotalRequests, 1)
 
-	m.StatusCodesMutex.Lock()
-	m.StatusCodes[statusCode]++
-	m.StatusCodesMutex.Unlock()
-
-	m.LatenciesMutex.Lock()
-	m.Latencies = append(m.Latencies, latency)
-	m.LatenciesMutex.Unlock()
-
-	// Track error if present
-	if errMsg != "" {
-		m.ErrorsMutex.Lock()
-		m.Errors[errMsg]++
-		m.ErrorsMutex.Unlock()
-	}
-
 	if statusCode >= 200 && statusCode < 300 {
 		if assertionPassed {
 			atomic.AddInt64(&m.SuccessCount, 1)
@@ -64,13 +78,18 @@ func (m *Metrics) AddRequestWithError(statusCode int, latency time.Duration, ass
 	} else {
 		atomic.AddInt64(&m.FailureCount, 1)
 	}
+
+	m.metricsChan <- metricEvent{
+		statusCode:      statusCode,
+		latency:         latency,
+		assertionPassed: assertionPassed,
+		errMsg:          errMsg,
+	}
 }
 
-// GetPercentile calculates a percentile from latencies
+// GetPercentile calculates a percentile from latencies.
+// Must only be called after Stop() to ensure all events have been aggregated.
 func (m *Metrics) GetPercentile(p float64) time.Duration {
-	m.LatenciesMutex.Lock()
-	defer m.LatenciesMutex.Unlock()
-
 	if len(m.Latencies) == 0 {
 		return 0
 	}
@@ -89,11 +108,9 @@ func (m *Metrics) GetPercentile(p float64) time.Duration {
 	return sorted[index]
 }
 
-// GetMinMaxAvg calculates min, max, and average latencies
+// GetMinMaxAvg calculates min, max, and average latencies.
+// Must only be called after Stop() to ensure all events have been aggregated.
 func (m *Metrics) GetMinMaxAvg() (min, max, avg time.Duration) {
-	m.LatenciesMutex.Lock()
-	defer m.LatenciesMutex.Unlock()
-
 	if len(m.Latencies) == 0 {
 		return 0, 0, 0
 	}

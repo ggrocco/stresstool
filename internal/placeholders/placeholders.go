@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -12,14 +11,26 @@ import (
 	"stresstool/internal/config"
 )
 
-// Evaluator handles placeholder evaluation
-type Evaluator struct {
-	config  *config.Config
-	vm      *goja.Runtime
-	vmMutex sync.Mutex
+// evalRequest is sent over the eval channel to the vm owner goroutine
+type evalRequest struct {
+	jsCode  string
+	reply   chan evalReply
 }
 
-// NewEvaluator creates a new placeholder evaluator
+// evalReply carries the result of a JS evaluation back to the caller
+type evalReply struct {
+	result string
+	err    error
+}
+
+// Evaluator handles placeholder evaluation
+type Evaluator struct {
+	config   *config.Config
+	evalChan chan evalRequest
+	stopChan chan struct{}
+}
+
+// NewEvaluator creates a new placeholder evaluator and starts the vm goroutine
 func NewEvaluator(cfg *config.Config) *Evaluator {
 	vm := goja.New()
 
@@ -32,10 +43,39 @@ func NewEvaluator(cfg *config.Config) *Evaluator {
 		return uuid.New().String()
 	})
 
-	return &Evaluator{
-		config: cfg,
-		vm:     vm,
+	e := &Evaluator{
+		config:   cfg,
+		evalChan: make(chan evalRequest, 64),
+		stopChan: make(chan struct{}),
 	}
+
+	// The vm goroutine is the sole owner of the goja runtime, eliminating the need for a mutex
+	go e.runVM(vm)
+
+	return e
+}
+
+// runVM is the dedicated goroutine that owns the goja runtime.
+// All JS evaluations are serialised through this goroutine via evalChan.
+func (e *Evaluator) runVM(vm *goja.Runtime) {
+	for {
+		select {
+		case <-e.stopChan:
+			return
+		case req := <-e.evalChan:
+			value, err := vm.RunString(req.jsCode)
+			if err != nil {
+				req.reply <- evalReply{err: fmt.Errorf("JS evaluation error: %w", err)}
+			} else {
+				req.reply <- evalReply{result: value.String()}
+			}
+		}
+	}
+}
+
+// Close shuts down the vm goroutine. Call this when the Evaluator is no longer needed.
+func (e *Evaluator) Close() {
+	close(e.stopChan)
 }
 
 var placeholderRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
@@ -96,30 +136,14 @@ func (e *Evaluator) evaluateFunction(name string) (string, error) {
 		return value, nil
 	}
 
-	// Check if it's a built-in JS function
-	e.vmMutex.Lock()
-	defer e.vmMutex.Unlock()
-
-	if fn, ok := goja.AssertFunction(e.vm.Get(name)); ok {
-		result, err := fn(goja.Undefined())
-		if err != nil {
-			return "", fmt.Errorf("failed to execute built-in function %s: %w", name, err)
-		}
-		return result.String(), nil
-	}
-
-	return "", fmt.Errorf("unknown function: %s", name)
+	// Delegate built-in JS function calls to the vm goroutine via the eval channel
+	return e.evaluateJS(name + "()")
 }
 
-// evaluateJS evaluates a JavaScript expression
+// evaluateJS sends a JS expression to the vm goroutine and returns the result
 func (e *Evaluator) evaluateJS(jsCode string) (string, error) {
-	e.vmMutex.Lock()
-	defer e.vmMutex.Unlock()
-
-	value, err := e.vm.RunString(jsCode)
-	if err != nil {
-		return "", fmt.Errorf("JS evaluation error: %w", err)
-	}
-
-	return value.String(), nil
+	reply := make(chan evalReply, 1)
+	e.evalChan <- evalRequest{jsCode: jsCode, reply: reply}
+	r := <-reply
+	return r.result, r.err
 }

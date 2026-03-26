@@ -85,8 +85,12 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 		}
 	}()
 
-	// Progress reporting goroutine
+	// Progress reporting goroutine — tracked so RunTest can wait for it to exit
+	// before returning, ensuring callers can safely close progressChan afterwards.
+	var progressWg sync.WaitGroup
+	progressWg.Add(1)
 	go func() {
+		defer progressWg.Done()
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -134,6 +138,8 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 	time.Sleep(time.Duration(test.RunSeconds) * time.Second)
 	close(stopChan)
 	wg.Wait()
+	progressWg.Wait()                                                           // ensure progress reporter has exited
+	metrics.Stop() // drain and close the metrics channel before reading results
 
 	// Final progress update
 	elapsed := time.Since(startTime)

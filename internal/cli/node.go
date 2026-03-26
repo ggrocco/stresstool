@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
@@ -170,6 +171,7 @@ func (n *Node) executeTests() error {
 
 	// Create evaluator
 	eval := placeholders.NewEvaluator(n.config)
+	defer eval.Close()
 
 	// Create runner
 	r := runner.NewRunner(eval, n.verbose)
