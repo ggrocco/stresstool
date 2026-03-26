@@ -17,7 +17,8 @@ var (
 	nodeName       string
 	controllerAddr string
 	listenAddr     string
-	uiAddr         string
+	webUI          bool
+	webPort        int
 )
 
 var rootCmd = &cobra.Command{
@@ -74,6 +75,10 @@ var controllerCmd = &cobra.Command{
 			return fmt.Errorf("config file is required (use -f or --file)")
 		}
 
+		uiAddr := ""
+		if webUI {
+			uiAddr = fmt.Sprintf(":%d", webPort)
+		}
 		if err := cli.RunController(listenAddr, configFile, uiAddr, parallel, verbose); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -104,7 +109,8 @@ func init() {
 	controllerCmd.Flags().StringVarP(&configFile, "file", "f", "", "Path to YAML configuration file (required)")
 	controllerCmd.MarkFlagRequired("file")
 	controllerCmd.Flags().StringVar(&listenAddr, "listen", ":8090", "Address for controller to listen on")
-	controllerCmd.Flags().StringVar(&uiAddr, "ui-addr", "", "Address for the web UI server (e.g. localhost:8091); disabled if empty")
+	controllerCmd.Flags().BoolVar(&webUI, "web", false, "Enable the web UI for triggering tests")
+	controllerCmd.Flags().IntVar(&webPort, "web-port", 8091, "Port for the web UI server (requires --web)")
 	controllerCmd.Flags().BoolVar(&parallel, "parallel", false, "Run tests in parallel on each node")
 	controllerCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
 	rootCmd.AddCommand(controllerCmd)
