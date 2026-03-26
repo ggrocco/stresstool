@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -61,6 +63,7 @@ type stateQueryReply struct {
 // Controller manages test execution across multiple nodes
 type Controller struct {
 	listenAddr string
+	uiAddr     string
 	config     *config.Config
 	parallel   bool
 	verbose    bool
@@ -73,6 +76,8 @@ type Controller struct {
 	completionChan chan struct{}
 	// quitChan asks the state manager to exit
 	quitChan chan struct{}
+	// triggerChan receives a signal from the UI to start tests
+	triggerChan chan struct{}
 }
 
 // NodeConnection represents a connected node
@@ -84,7 +89,7 @@ type NodeConnection struct {
 }
 
 // RunController starts the controller and waits for nodes to connect
-func RunController(listenAddr, configFile string, parallel, verbose bool) error {
+func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool) error {
 	// Load configuration
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
@@ -97,6 +102,7 @@ func RunController(listenAddr, configFile string, parallel, verbose bool) error 
 
 	ctrl := &Controller{
 		listenAddr:     listenAddr,
+		uiAddr:         uiAddr,
 		config:         cfg,
 		parallel:       parallel,
 		verbose:        verbose,
@@ -104,6 +110,7 @@ func RunController(listenAddr, configFile string, parallel, verbose bool) error 
 		queryChan:      make(chan stateQuery),
 		completionChan: make(chan struct{}),
 		quitChan:       make(chan struct{}),
+		triggerChan:    make(chan struct{}, 1),
 	}
 
 	return ctrl.start()
@@ -267,7 +274,14 @@ func (c *Controller) start() error {
 	fmt.Printf("Controller listening on %s\n", c.listenAddr)
 	fmt.Printf("Loaded config with %d test(s)\n", len(c.config.Tests))
 	fmt.Println("\nWaiting for nodes to connect...")
-	fmt.Println("Press Ctrl+C to cancel, or wait for nodes and then type 'start' to begin tests")
+
+	if c.uiAddr != "" {
+		go c.startUIServer()
+		fmt.Printf("UI available at http://%s — use the web interface to check nodes and start tests\n", c.uiAddr)
+		fmt.Println("Press Ctrl+C to cancel, or type 'start' / 'nodes' in this terminal as well.")
+	} else {
+		fmt.Println("Press Ctrl+C to cancel, or wait for nodes and then type 'start' to begin tests")
+	}
 
 	// Start accepting connections in background
 	connChan := make(chan net.Conn)
@@ -290,7 +304,6 @@ func (c *Controller) start() error {
 		}
 	}()
 
-	// Simple input handler - wait for "start" command
 	fmt.Println("\nType 'start' when ready to begin tests, or 'nodes' to see connected nodes:")
 
 	for {
@@ -306,6 +319,9 @@ func (c *Controller) start() error {
 			default:
 				fmt.Println("Unknown command. Type 'start' to begin or 'nodes' to list connected nodes.")
 			}
+		case <-c.triggerChan:
+			fmt.Println("Start triggered via UI...")
+			return c.startTests()
 		}
 	}
 }
@@ -525,6 +541,146 @@ func (c *Controller) printFinalSummary() {
 		fmt.Println("OVERALL RESULT: ✗ SOME TESTS FAILED")
 	}
 	fmt.Println(strings.Repeat("=", 80))
+}
+
+// uiHTML is the HTML page served by the optional web UI.
+const uiHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stresstool Controller</title>
+<style>
+  body { font-family: monospace; max-width: 860px; margin: 40px auto; padding: 0 20px; background: #1e1e1e; color: #d4d4d4; }
+  h1 { color: #4ec9b0; margin-bottom: 4px; }
+  h2 { color: #9cdcfe; font-size: 1rem; margin-top: 28px; }
+  .meta { color: #6a9955; font-size: 0.85rem; margin-bottom: 24px; }
+  #nodes-list { margin: 8px 0 20px; min-height: 40px; }
+  .node { padding: 7px 12px; margin: 4px 0; background: #252526; border-left: 3px solid #4ec9b0; }
+  .no-nodes { color: #6a9955; font-style: italic; }
+  .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  button { padding: 8px 18px; font-family: monospace; font-size: 0.9rem; cursor: pointer; border: 1px solid #555; border-radius: 3px; background: #3c3c3c; color: #d4d4d4; }
+  button:hover:not(:disabled) { border-color: #9cdcfe; color: #9cdcfe; }
+  #start-btn { background: #0e4429; border-color: #4ec9b0; color: #4ec9b0; font-weight: bold; }
+  #start-btn:hover:not(:disabled) { background: #155c38; }
+  #start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #status { font-size: 0.85rem; color: #ce9178; }
+  .refresh-hint { font-size: 0.75rem; color: #555; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Stresstool Controller</h1>
+<p class="meta">Auto-refreshing every 2 s &mdash; or click Check Nodes to refresh now.</p>
+
+<h2>Connected Nodes</h2>
+<div id="nodes-list"><span class="no-nodes">Loading&hellip;</span></div>
+
+<div class="actions">
+  <button id="check-btn" onclick="refreshNodes()">Check Nodes</button>
+  <button id="start-btn" onclick="startTests()" disabled>Start Tests</button>
+  <span id="status"></span>
+</div>
+<p class="refresh-hint">You can also type <code>start</code> or <code>nodes</code> in the controller terminal.</p>
+
+<script>
+async function refreshNodes() {
+  try {
+    const res = await fetch('/api/nodes');
+    const data = await res.json();
+    const div = document.getElementById('nodes-list');
+    const btn = document.getElementById('start-btn');
+    if (!data.nodes || data.nodes.length === 0) {
+      div.innerHTML = '<span class="no-nodes">No nodes connected yet&hellip;</span>';
+      btn.disabled = true;
+    } else {
+      div.innerHTML = data.nodes.map(n => '<div class="node">&#10003; ' + n + '</div>').join('');
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById('status').textContent = 'Error fetching nodes: ' + e.message;
+  }
+}
+
+async function startTests() {
+  const btn = document.getElementById('start-btn');
+  const checkBtn = document.getElementById('check-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  checkBtn.disabled = true;
+  status.textContent = 'Sending start signal\u2026';
+  try {
+    const res = await fetch('/api/start', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      status.textContent = 'Tests started! Monitor progress in the controller terminal.';
+    } else {
+      status.textContent = 'Error: ' + (data.error || 'unknown');
+      btn.disabled = false;
+      checkBtn.disabled = false;
+    }
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    btn.disabled = false;
+    checkBtn.disabled = false;
+  }
+}
+
+refreshNodes();
+setInterval(refreshNodes, 2000);
+</script>
+</body>
+</html>`
+
+// startUIServer starts an HTTP server that provides a web UI for triggering tests.
+func (c *Controller) startUIServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", c.handleUIIndex)
+	mux.HandleFunc("/api/nodes", c.handleAPINodes)
+	mux.HandleFunc("/api/start", c.handleAPIStart)
+
+	if err := http.ListenAndServe(c.uiAddr, mux); err != nil {
+		fmt.Printf("UI server error: %v\n", err)
+	}
+}
+
+func (c *Controller) handleUIIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprint(w, uiHTML)
+}
+
+func (c *Controller) handleAPINodes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	nodes := c.queryNodes()
+	names := make([]string, 0, len(nodes))
+	for name := range nodes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"nodes": names})
+}
+
+func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	select {
+	case c.triggerChan <- struct{}{}:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "start already triggered or tests already running"})
+	}
 }
 
 func printTestResult(result *runner.TestResult) {

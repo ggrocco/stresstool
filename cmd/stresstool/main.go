@@ -17,6 +17,7 @@ var (
 	nodeName       string
 	controllerAddr string
 	listenAddr     string
+	uiAddr         string
 )
 
 var rootCmd = &cobra.Command{
@@ -73,7 +74,7 @@ var controllerCmd = &cobra.Command{
 			return fmt.Errorf("config file is required (use -f or --file)")
 		}
 
-		if err := cli.RunController(listenAddr, configFile, parallel, verbose); err != nil {
+		if err := cli.RunController(listenAddr, configFile, uiAddr, parallel, verbose); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -103,6 +104,7 @@ func init() {
 	controllerCmd.Flags().StringVarP(&configFile, "file", "f", "", "Path to YAML configuration file (required)")
 	controllerCmd.MarkFlagRequired("file")
 	controllerCmd.Flags().StringVar(&listenAddr, "listen", ":8090", "Address for controller to listen on")
+	controllerCmd.Flags().StringVar(&uiAddr, "ui-addr", "", "Address for the web UI server (e.g. localhost:8091); disabled if empty")
 	controllerCmd.Flags().BoolVar(&parallel, "parallel", false, "Run tests in parallel on each node")
 	controllerCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
 	rootCmd.AddCommand(controllerCmd)
