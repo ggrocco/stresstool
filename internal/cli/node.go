@@ -64,12 +64,12 @@ func (n *Node) start() error {
 	n.decoder = json.NewDecoder(bufio.NewReader(conn))
 
 	// Send hello message
-	helloMsg := protocol.Message{
-		Type: protocol.MsgTypeHello,
-		Data: protocol.HelloMessage{
-			NodeName: n.nodeName,
-			Version:  "1.0.0",
-		},
+	helloMsg, err := newProtocolMessage(protocol.MsgTypeHello, protocol.HelloMessage{
+		NodeName: n.nodeName,
+		Version:  "1.0.0",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to build hello message: %w", err)
 	}
 
 	if err := n.encoder.Encode(helloMsg); err != nil {
@@ -92,7 +92,7 @@ func (n *Node) handleMessages() error {
 
 		switch msg.Type {
 		case protocol.MsgTypeTestSpec:
-			specData, err := parseMessageData[protocol.TestSpecMessage](msg.Data)
+			specData, err := decodeProtocolMessageData[protocol.TestSpecMessage](msg)
 			if err != nil {
 				return fmt.Errorf("failed to parse test spec: %w", err)
 			}
@@ -120,13 +120,14 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 		fmt.Printf("Config validation failed: %v\n", err)
 		
 		// Send error message to controller
-		errorMsg := protocol.Message{
-			Type: protocol.MsgTypeError,
-			Data: protocol.ErrorMessage{
-				NodeName: n.nodeName,
-				Error:    err.Error(),
-				Phase:    "validation",
-			},
+		errorMsg, msgErr := newProtocolMessage(protocol.MsgTypeError, protocol.ErrorMessage{
+			NodeName: n.nodeName,
+			Error:    err.Error(),
+			Phase:    "validation",
+		})
+		if msgErr != nil {
+			fmt.Printf("Failed to build error message: %v\n", msgErr)
+			return
 		}
 		
 		if encErr := n.encoder.Encode(errorMsg); encErr != nil {
@@ -144,11 +145,13 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 	}
 
 	// Send ready message
-	readyMsg := protocol.Message{
-		Type: protocol.MsgTypeReady,
-		Data: protocol.ReadyMessage{
-			NodeName: n.nodeName,
-		},
+	readyMsg, err := newProtocolMessage(protocol.MsgTypeReady, protocol.ReadyMessage{NodeName: n.nodeName})
+	if err != nil {
+		fmt.Printf("Failed to build ready message: %v\n", err)
+		if n.conn != nil {
+			_ = n.conn.Close()
+		}
+		return
 	}
 
 	if err := n.encoder.Encode(readyMsg); err != nil {
@@ -211,13 +214,13 @@ func (n *Node) executeTests() error {
 
 	// Send results to controller
 	for _, result := range results {
-		resultMsg := protocol.Message{
-			Type: protocol.MsgTypeTestResult,
-			Data: protocol.TestResultMessage{
-				NodeName: n.nodeName,
-				TestName: result.Test.Name,
-				Result:   result,
-			},
+		resultMsg, err := newProtocolMessage(protocol.MsgTypeTestResult, protocol.TestResultMessage{
+			NodeName: n.nodeName,
+			TestName: result.Test.Name,
+			Result:   result,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to build test result for %s: %w", result.Test.Name, err)
 		}
 
 		// Retry sending result with exponential backoff
@@ -254,17 +257,20 @@ func (n *Node) reportProgress(progressChan <-chan runner.ProgressUpdate, wg *syn
 	defer wg.Done()
 	for update := range progressChan {
 		// Send to controller
-		progressMsg := protocol.Message{
-			Type: protocol.MsgTypeProgress,
-			Data: protocol.ProgressMessage{
-				NodeName: n.nodeName,
-				TestName: update.TestName,
-				Elapsed:  update.Elapsed.Seconds(),
-				Total:    update.Total,
-				Failures: update.Failures,
-				RPS:      update.RPS,
-				Done:     update.Done,
-			},
+		progressMsg, err := newProtocolMessage(protocol.MsgTypeProgress, protocol.ProgressMessage{
+			NodeName: n.nodeName,
+			TestName: update.TestName,
+			Elapsed:  update.Elapsed.Seconds(),
+			Total:    update.Total,
+			Failures: update.Failures,
+			RPS:      update.RPS,
+			Done:     update.Done,
+		})
+		if err != nil {
+			if n.verbose {
+				fmt.Printf("Failed to build progress update: %v\n", err)
+			}
+			continue
 		}
 
 		if err := n.encoder.Encode(progressMsg); err != nil {

@@ -179,7 +179,13 @@ tests:
 
 ## Communication Protocol
 
-The controller and nodes communicate using JSON messages over TCP:
+The controller and nodes communicate over persistent TCP connections using
+message envelopes with JSON payloads:
+
+- Envelope fields are now strongly typed (`type` + raw JSON payload) to avoid
+  repeated map/object re-encoding while decoding messages.
+- This lowers CPU overhead compared with decoding `interface{}` payloads and is
+  a cleaner migration point for a future protobuf/gRPC transport.
 
 ### Message Types
 
@@ -190,6 +196,13 @@ The controller and nodes communicate using JSON messages over TCP:
 5. **Progress**: Node sends real-time progress updates
 6. **TestResult**: Node sends final test results
 7. **Complete**: Controller signals all tests are done
+
+### About gRPC
+
+gRPC can improve performance for larger distributed runs because protobuf is
+typically smaller and faster to encode/decode than JSON, and HTTP/2 provides
+stream multiplexing and flow control. For small clusters, the performance
+difference is often modest; request execution load is usually the main bottleneck.
 
 ## Benefits of Distributed Mode
 

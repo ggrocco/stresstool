@@ -345,7 +345,7 @@ func (c *Controller) handleNodeConnection(conn net.Conn) {
 	}
 
 	// Parse hello data
-	helloData, err := parseMessageData[protocol.HelloMessage](msg.Data)
+	helloData, err := decodeProtocolMessageData[protocol.HelloMessage](msg)
 	if err != nil {
 		fmt.Printf("Failed to parse hello message: %v\n", err)
 		conn.Close()
@@ -386,7 +386,7 @@ func (c *Controller) handleNodeMessages(nodeName string, decoder *json.Decoder) 
 
 		switch msg.Type {
 		case protocol.MsgTypeProgress:
-			progressData, err := parseMessageData[protocol.ProgressMessage](msg.Data)
+			progressData, err := decodeProtocolMessageData[protocol.ProgressMessage](msg)
 			if err != nil {
 				fmt.Printf("Failed to parse progress message: %v\n", err)
 				continue
@@ -394,7 +394,7 @@ func (c *Controller) handleNodeMessages(nodeName string, decoder *json.Decoder) 
 			c.eventChan <- controllerEvent{kind: evProgress, progress: progressData}
 
 		case protocol.MsgTypeTestResult:
-			resultData, err := parseMessageData[protocol.TestResultMessage](msg.Data)
+			resultData, err := decodeProtocolMessageData[protocol.TestResultMessage](msg)
 			if err != nil {
 				fmt.Printf("Failed to parse test result message: %v\n", err)
 				continue
@@ -407,7 +407,7 @@ func (c *Controller) handleNodeMessages(nodeName string, decoder *json.Decoder) 
 			}
 
 		case protocol.MsgTypeError:
-			errorData, err := parseMessageData[protocol.ErrorMessage](msg.Data)
+			errorData, err := decodeProtocolMessageData[protocol.ErrorMessage](msg)
 			if err != nil {
 				fmt.Printf("Failed to parse error message: %v\n", err)
 				continue
@@ -452,9 +452,10 @@ func (c *Controller) startTests() error {
 			NodeName: nodeName,
 			Parallel: c.parallel,
 		}
-		msg := protocol.Message{
-			Type: protocol.MsgTypeTestSpec,
-			Data: spec,
+		msg, err := newProtocolMessage(protocol.MsgTypeTestSpec, spec)
+		if err != nil {
+			fmt.Printf("Failed to build test spec for %s: %v\n", nodeName, err)
+			continue
 		}
 		if err := node.Encoder.Encode(msg); err != nil {
 			fmt.Printf("Failed to send test spec to %s: %v\n", nodeName, err)
@@ -465,11 +466,11 @@ func (c *Controller) startTests() error {
 	time.Sleep(500 * time.Millisecond)
 
 	// Send start signal to each node
-	startMsg := protocol.Message{
-		Type: protocol.MsgTypeStartTests,
-		Data: protocol.StartTestsMessage{
-			Timestamp: time.Now().Unix(),
-		},
+	startMsg, err := newProtocolMessage(protocol.MsgTypeStartTests, protocol.StartTestsMessage{
+		Timestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to build start signal: %w", err)
 	}
 	for nodeName, node := range nodes {
 		if err := node.Encoder.Encode(startMsg); err != nil {
@@ -484,9 +485,9 @@ func (c *Controller) startTests() error {
 	c.printFinalSummary()
 
 	// Notify all nodes that the run is complete so they can disconnect
-	completeMsg := protocol.Message{
-		Type: protocol.MsgTypeComplete,
-		Data: nil,
+	completeMsg, err := newProtocolMessage(protocol.MsgTypeComplete, nil)
+	if err != nil {
+		return fmt.Errorf("failed to build completion signal: %w", err)
 	}
 	for nodeName, node := range nodes {
 		if err := node.Encoder.Encode(completeMsg); err != nil {
@@ -711,4 +712,3 @@ func printTestResult(result *runner.TestResult) {
 		fmt.Printf("  Result: ✗ FAILED\n")
 	}
 }
-
