@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package stresstool.v1;
+
+option go_package = "stresstool/internal/protocol/payloadpb;payloadpb";
+
+message Envelope {
+  MessageType type = 1;
+  bytes payload = 2;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_HELLO = 1;
+  MESSAGE_TYPE_TEST_SPEC = 2;
+  MESSAGE_TYPE_PROGRESS = 3;
+  MESSAGE_TYPE_TEST_RESULT = 4;
+  MESSAGE_TYPE_START_TESTS = 5;
+  MESSAGE_TYPE_READY = 6;
+  MESSAGE_TYPE_COMPLETE = 7;
+  MESSAGE_TYPE_ERROR = 8;
+}
+
+message Config {
+  repeated FuncDef funcs = 1;
+  repeated Test tests = 2;
+}
+
+message FuncDef {
+  string name = 1;
+  repeated string cmd = 2;
+}
+
+message Test {
+  string name = 1;
+  string path = 2;
+  string method = 3;
+  int32 requests_per_second = 4;
+  int32 threads = 5;
+  int32 run_seconds = 6;
+  map<string, string> headers = 7;
+  string body = 8;
+  Assertion assert = 9;
+  map<string, NodeOverride> nodes = 10;
+}
+
+message NodeOverride {
+  int32 requests_per_second = 1;
+  int32 threads = 2;
+}
+
+message Assertion {
+  int32 status_code = 1;
+  string body_contains = 2;
+  string body_equals = 3;
+  string body_not_equals = 4;
+  int32 max_latency_ms = 5;
+}
+
+message HelloMessage {
+  string node_name = 1;
+  string version = 2;
+}
+
+message TestSpecMessage {
+  Config config = 1;
+  string node_name = 2;
+  bool parallel = 3;
+}
+
+message ProgressMessage {
+  string node_name = 1;
+  string test_name = 2;
+  double elapsed_seconds = 3;
+  int64 total_requests = 4;
+  int64 failures = 5;
+  double rps = 6;
+  bool done = 7;
+}
+
+message TestResultMessage {
+  string node_name = 1;
+  string test_name = 2;
+  TestResult result = 3;
+}
+
+message TestResult {
+  Test test = 1;
+  Metrics metrics = 2;
+  Assertions assertions = 3;
+  bool passed = 4;
+  repeated string errors = 5;
+}
+
+message Assertions {}
+
+message Metrics {
+  int64 total_requests = 1;
+  int64 success_count = 2;
+  int64 failure_count = 3;
+  int64 assertion_failures = 4;
+  repeated int64 latencies_nanos = 5;
+  map<int32, int64> status_codes = 6;
+  map<string, int64> errors = 7;
+}
+
+message ReadyMessage {
+  string node_name = 1;
+}
+
+message StartTestsMessage {
+  int64 timestamp = 1;
+}
+
+message ErrorMessage {
+  string node_name = 1;
+  string error = 2;
+  string phase = 3;
+}
+
+message CompleteMessage {}

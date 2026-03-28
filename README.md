@@ -204,6 +204,17 @@ typically smaller and faster to encode/decode than JSON, and HTTP/2 provides
 stream multiplexing and flow control. For small clusters, the performance
 difference is often modest; request execution load is usually the main bottleneck.
 
+### Protobuf/Buf schema source
+
+Payload schemas are defined in `proto/api/v1/payload.proto`, with Buf
+module and generation config in `buf.yaml` and `buf.gen.yaml`.
+
+Generate Go payload types/stubs with:
+
+```bash
+buf generate
+```
+
 ## Benefits of Distributed Mode
 
 1. **Higher Load**: Distribute load across multiple machines to test at scale
