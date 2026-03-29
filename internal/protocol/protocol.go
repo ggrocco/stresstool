@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"encoding/json"
+	"fmt"
 	"stresstool/internal/config"
 	"stresstool/internal/runner"
 )
@@ -29,8 +31,36 @@ const (
 
 // Message is the base message structure
 type Message struct {
-	Type MessageType `json:"type"`
-	Data interface{} `json:"data,omitempty"`
+	Type MessageType     `json:"type"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// NewMessage marshals payload into a message.
+func NewMessage(msgType MessageType, payload any) (Message, error) {
+	if payload == nil {
+		return Message{Type: msgType}, nil
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return Message{}, fmt.Errorf("marshal %s payload: %w", msgType, err)
+	}
+
+	return Message{
+		Type: msgType,
+		Data: data,
+	}, nil
+}
+
+// DecodeData unmarshals the message payload into out.
+func (m Message) DecodeData(out any) error {
+	if len(m.Data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(m.Data, out); err != nil {
+		return fmt.Errorf("decode %s payload: %w", m.Type, err)
+	}
+	return nil
 }
 
 // HelloMessage is sent by nodes when they connect
