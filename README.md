@@ -290,6 +290,26 @@ go build -o stresstool ./cmd/stresstool
 go install ./cmd/stresstool
 ```
 
+## Dependency Maintenance and Risk Checks
+
+Use the helper script below to check for outdated modules and known
+vulnerabilities:
+
+```bash
+./scripts-deps-check.sh
+```
+
+To attempt dependency upgrades first, then run the same risk checks:
+
+```bash
+./scripts-deps-check.sh --upgrade
+```
+
+The script runs:
+
+- `go list -m -u all` to report outdated dependencies
+- `govulncheck ./...` to find known vulnerabilities in reachable code paths
+
 ## Architecture Benefits
 
 - **Separation of Concerns**: Controller handles coordination, nodes handle execution
