@@ -73,4 +73,4 @@ YAML-based (see `example-config.yaml`). Key features:
 
 ## Dependencies
 
-Go 1.21+. Core deps: cobra (CLI), yaml.v3 (config), goja (JS eval), google/uuid.
+Go 1.26.1+. Core deps: cobra (CLI), yaml.v3 (config), goja (JS eval), google/uuid, golang.org/x/time (rate limiting).

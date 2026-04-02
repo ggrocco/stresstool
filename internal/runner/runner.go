@@ -2,12 +2,15 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
@@ -52,38 +55,15 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 		Errors:     make([]string, 0),
 	}
 
-	// Create request channel for rate limiting
-	requestChan := make(chan struct{}, test.Threads*2)
+	startTime := time.Now()
+	endTime := startTime.Add(time.Duration(test.RunSeconds) * time.Second)
+	runCtx, cancelRun := context.WithDeadline(context.Background(), endTime)
+	defer cancelRun()
+
+	limiter := rate.NewLimiter(rate.Limit(float64(test.RequestsPerSecond)), 1)
 
 	// Create worker pool
 	var wg sync.WaitGroup
-	stopChan := make(chan struct{})
-	startTime := time.Now()
-	endTime := startTime.Add(time.Duration(test.RunSeconds) * time.Second)
-
-	// Rate limiter: send tokens to request channel at desired RPS
-	interval := time.Duration(float64(time.Second) / float64(test.RequestsPerSecond))
-	rateTicker := time.NewTicker(interval)
-	defer rateTicker.Stop()
-
-	go func() {
-		defer close(requestChan)
-		for {
-			select {
-			case <-stopChan:
-				return
-			case <-rateTicker.C:
-				if time.Now().After(endTime) {
-					return
-				}
-				select {
-				case requestChan <- struct{}{}:
-				default:
-					// Channel full, skip (shouldn't happen with proper sizing)
-				}
-			}
-		}
-	}()
 
 	// Progress reporting goroutine — tracked so RunTest can wait for it to exit
 	// before returning, ensuring callers can safely close progressChan afterwards.
@@ -95,7 +75,7 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 		defer ticker.Stop()
 		for {
 			select {
-			case <-stopChan:
+			case <-runCtx.Done():
 				return
 			case <-ticker.C:
 				elapsed := time.Since(startTime)
@@ -118,25 +98,15 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 		go func() {
 			defer wg.Done()
 			for {
-				select {
-				case <-stopChan:
+				if err := limiter.Wait(runCtx); err != nil {
 					return
-				case _, ok := <-requestChan:
-					if !ok {
-						return
-					}
-					if time.Now().After(endTime) {
-						return
-					}
-					r.executeRequest(test, metrics, assertions)
 				}
+				r.executeRequest(test, metrics, assertions)
 			}
 		}()
 	}
 
-	// Wait for duration
-	time.Sleep(time.Duration(test.RunSeconds) * time.Second)
-	close(stopChan)
+	<-runCtx.Done()
 	wg.Wait()
 	progressWg.Wait()                                                           // ensure progress reporter has exited
 	metrics.Stop() // drain and close the metrics channel before reading results

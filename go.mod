@@ -1,11 +1,12 @@
 module stresstool
 
-go 1.21
+go 1.26.1
 
 require (
 	github.com/dop251/goja v0.0.0-20231027120936-b396bb4c349d
 	github.com/google/uuid v1.4.0
 	github.com/spf13/cobra v1.8.0
+	golang.org/x/time v0.5.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
