@@ -1,0 +1,15 @@
+body { font-family: monospace; max-width: 860px; margin: 40px auto; padding: 0 20px; background: #1e1e1e; color: #d4d4d4; }
+h1 { color: #4ec9b0; margin-bottom: 4px; }
+h2 { color: #9cdcfe; font-size: 1rem; margin-top: 28px; }
+.meta { color: #6a9955; font-size: 0.85rem; margin-bottom: 24px; }
+#nodes-list { margin: 8px 0 20px; min-height: 40px; }
+.node { padding: 7px 12px; margin: 4px 0; background: #252526; border-left: 3px solid #4ec9b0; }
+.no-nodes { color: #6a9955; font-style: italic; }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+button { padding: 8px 18px; font-family: monospace; font-size: 0.9rem; cursor: pointer; border: 1px solid #555; border-radius: 3px; background: #3c3c3c; color: #d4d4d4; }
+button:hover:not(:disabled) { border-color: #9cdcfe; color: #9cdcfe; }
+#start-btn { background: #0e4429; border-color: #4ec9b0; color: #4ec9b0; font-weight: bold; }
+#start-btn:hover:not(:disabled) { background: #155c38; }
+#start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#status { font-size: 0.85rem; color: #ce9178; }
+.refresh-hint { font-size: 0.75rem; color: #555; margin-top: 16px; }

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stresstool Controller</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>Stresstool Controller</h1>
+<p class="meta">Auto-refreshing every 2 s &mdash; or click Check Nodes to refresh now.</p>
+
+<h2>Connected Nodes</h2>
+<div id="nodes-list"><span class="no-nodes">Loading&hellip;</span></div>
+
+<div class="actions">
+  <button id="check-btn" onclick="refreshNodes()">Check Nodes</button>
+  <button id="start-btn" onclick="startTests()" disabled>Start Tests</button>
+  <span id="status"></span>
+</div>
+<p class="refresh-hint">You can also type <code>start</code> or <code>nodes</code> in the controller terminal.</p>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
