@@ -57,6 +57,8 @@ The controller will:
 Options:
 - `-f, --file`: Path to YAML configuration file (required)
 - `--listen`: Address to listen on (default: `:8090`)
+- `--web`: Enable the web UI for triggering tests
+- `--web-port`: Port for the web UI server (default: `8091`, requires `--web`)
 - `--parallel`: Run tests in parallel on each node
 - `--verbose`: Print detailed logs
 
@@ -106,6 +108,26 @@ The controller will:
 2. Signal nodes to start simultaneously
 3. Display real-time progress from all nodes
 4. Aggregate and display final results
+
+### 3. Controller Web Mode
+
+The controller includes an optional web UI for managing tests from a browser. Enable it with the `--web` flag:
+
+```bash
+# Start controller with web UI on default port (8091)
+./stresstool controller -f config.yaml --listen :8090 --web
+
+# Or specify a custom web UI port
+./stresstool controller -f config.yaml --listen :8090 --web --web-port 9000
+```
+
+Options:
+- `--web`: Enable the web UI (disabled by default)
+- `--web-port`: Port for the web UI server (default: `8091`, requires `--web`)
+
+Once running, open `http://localhost:8091` in your browser. The UI auto-refreshes every 2 seconds and shows all connected nodes. Click **Start Tests** to trigger execution, or continue using the terminal commands (`start` / `nodes`) as usual.
+
+![Controller Web UI](docs/controller-web-ui.png)
 
 ## Configuration
 

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -69,6 +70,7 @@ type stateQueryReply struct {
 type Controller struct {
 	listenAddr string
 	uiAddr     string
+	configFile string
 	config     *config.Config
 	parallel   bool
 	verbose    bool
@@ -83,6 +85,9 @@ type Controller struct {
 	quitChan chan struct{}
 	// triggerChan receives a signal from the UI to start tests
 	triggerChan chan struct{}
+
+	logChan      chan string
+	logQueryChan chan logQuery
 }
 
 // NodeConnection represents a connected node
@@ -91,6 +96,44 @@ type NodeConnection struct {
 	Conn    net.Conn
 	Encoder *json.Encoder
 	Decoder *json.Decoder
+}
+
+type logQuery struct {
+	offset    int
+	replyChan chan logQueryReply
+}
+
+type logQueryReply struct {
+	lines []string
+	total int
+}
+
+// log writes a message to both stdout and the internal log buffer for the web UI.
+func (c *Controller) log(format string, args ...interface{}) {
+	line := fmt.Sprintf(format, args...)
+	fmt.Println(line)
+	c.logChan <- line
+}
+
+// runLogManager owns the log buffer and serves queries via channels.
+func (c *Controller) runLogManager() {
+	var buf []string
+	for {
+		select {
+		case <-c.quitChan:
+			return
+		case line := <-c.logChan:
+			buf = append(buf, line)
+		case q := <-c.logQueryChan:
+			offset := q.offset
+			if offset > len(buf) {
+				offset = len(buf)
+			}
+			cp := make([]string, len(buf[offset:]))
+			copy(cp, buf[offset:])
+			q.replyChan <- logQueryReply{lines: cp, total: len(buf)}
+		}
+	}
 }
 
 // RunController starts the controller and waits for nodes to connect
@@ -108,6 +151,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 	ctrl := &Controller{
 		listenAddr:     listenAddr,
 		uiAddr:         uiAddr,
+		configFile:     configFile,
 		config:         cfg,
 		parallel:       parallel,
 		verbose:        verbose,
@@ -116,6 +160,8 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		completionChan: make(chan struct{}),
 		quitChan:       make(chan struct{}),
 		triggerChan:    make(chan struct{}, 1),
+		logChan:        make(chan string, 100),
+		logQueryChan:   make(chan logQuery),
 	}
 
 	return ctrl.start()
@@ -154,7 +200,7 @@ func (c *Controller) runStateManager() {
 
 			case evNodeDisconnected:
 				delete(nodes, event.nodeName)
-				fmt.Printf("✗ Node disconnected: %s\n", event.nodeName)
+				c.log("✗ Node disconnected: %s", event.nodeName)
 
 			case evProgress:
 				p := event.progress
@@ -163,20 +209,30 @@ func (c *Controller) runStateManager() {
 				}
 				progress[p.NodeName][p.TestName] = p
 
-				// Redraw progress lines
+				// Log progress to web UI
+				prefix := fmt.Sprintf("%s / %s", p.NodeName, p.TestName)
+				if p.Done {
+					c.log("✓ %s: COMPLETE - %d requests, %.1f RPS, %d failures",
+						prefix, p.Total, p.RPS, p.Failures)
+				} else {
+					c.log("→ %s: %.0fs elapsed - %d requests, %.1f RPS, %d failures",
+						prefix, p.Elapsed, p.Total, p.RPS, p.Failures)
+				}
+
+				// Redraw progress lines in terminal
 				if lineCount > 0 {
 					fmt.Printf("\033[%dA", lineCount)
 				}
 				lineCount = 0
 				for nodeName, nodeProgress := range progress {
 					for _, pr := range nodeProgress {
-						prefix := fmt.Sprintf("%s / %s", nodeName, pr.TestName)
+						termPrefix := fmt.Sprintf("%s / %s", nodeName, pr.TestName)
 						if pr.Done {
 							fmt.Printf("✓ %s: COMPLETE - %d requests, %.1f RPS, %d failures\n",
-								prefix, pr.Total, pr.RPS, pr.Failures)
+								termPrefix, pr.Total, pr.RPS, pr.Failures)
 						} else {
 							fmt.Printf("→ %s: %.0fs elapsed - %d requests, %.1f RPS, %d failures\n",
-								prefix, pr.Elapsed, pr.Total, pr.RPS, pr.Failures)
+								termPrefix, pr.Elapsed, pr.Total, pr.RPS, pr.Failures)
 						}
 						lineCount++
 					}
@@ -195,7 +251,7 @@ func (c *Controller) runStateManager() {
 
 			case evNodeError:
 				nodeErrors[event.nodeErr.NodeName] = event.nodeErr
-				fmt.Printf("✗ Error from node %s during %s: %s\n",
+				c.log("✗ Error from node %s during %s: %s",
 					event.nodeErr.NodeName, event.nodeErr.Phase, event.nodeErr.Error)
 				checkCompletion()
 
@@ -275,6 +331,7 @@ func (c *Controller) start() error {
 
 	// Start the state manager goroutine
 	go c.runStateManager()
+	go c.runLogManager()
 
 	fmt.Printf("Controller listening on %s\n", c.listenAddr)
 	fmt.Printf("Loaded config with %d test(s)\n", len(c.config.Tests))
@@ -325,7 +382,7 @@ func (c *Controller) start() error {
 				fmt.Println("Unknown command. Type 'start' to begin or 'nodes' to list connected nodes.")
 			}
 		case <-c.triggerChan:
-			fmt.Println("Start triggered via UI...")
+			c.log("Start triggered via UI...")
 			return c.startTests()
 		}
 	}
@@ -358,7 +415,7 @@ func (c *Controller) handleNodeConnection(conn net.Conn) {
 	}
 
 	nodeName := helloData.NodeName
-	fmt.Printf("✓ Node connected: %s\n", nodeName)
+	c.log("✓ Node connected: %s", nodeName)
 
 	// Register node with state manager
 	c.eventChan <- controllerEvent{
@@ -438,7 +495,7 @@ func (c *Controller) startTests() error {
 		return fmt.Errorf("no nodes connected")
 	}
 
-	fmt.Printf("\nStarting tests on %d node(s)...\n\n", len(nodes))
+	c.log("Starting tests on %d node(s)...", len(nodes))
 
 	// Build expected results map and tell the state manager
 	expected := make(map[string]map[string]bool, len(nodes))
@@ -560,12 +617,21 @@ func (c *Controller) startUIServer() {
 			http.NotFound(w, r)
 			return
 		}
-		r.URL.Path = "/index.html"
-		staticFS.ServeHTTP(w, r)
+		f, err := webContent.Open("index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer f.Close()
+		data, _ := io.ReadAll(f)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
 	})
 	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
 	mux.HandleFunc("/api/nodes", c.handleAPINodes)
 	mux.HandleFunc("/api/start", c.handleAPIStart)
+	mux.HandleFunc("/api/config", c.handleAPIConfig)
+	mux.HandleFunc("/api/logs", c.handleAPILogs)
 
 	if err := http.ListenAndServe(c.uiAddr, mux); err != nil {
 		fmt.Printf("UI server error: %v\n", err)
@@ -578,13 +644,27 @@ func (c *Controller) handleAPINodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes := c.queryNodes()
-	names := make([]string, 0, len(nodes))
-	for name := range nodes {
-		names = append(names, name)
+	type nodeInfo struct {
+		Name string `json:"name"`
+		Addr string `json:"addr"`
 	}
-	sort.Strings(names)
+	infos := make([]nodeInfo, 0, len(nodes))
+	for name, nc := range nodes {
+		addr := ""
+		if nc.Conn != nil {
+			host, _, _ := net.SplitHostPort(nc.Conn.RemoteAddr().String())
+			ip := net.ParseIP(host)
+			if ip != nil && ip.IsLoopback() {
+				addr = "local"
+			} else {
+				addr = host
+			}
+		}
+		infos = append(infos, nodeInfo{Name: name, Addr: addr})
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"nodes": names})
+	json.NewEncoder(w).Encode(map[string]interface{}{"nodes": infos})
 }
 
 func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
@@ -601,6 +681,41 @@ func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "start already triggered or tests already running"})
 	}
+}
+
+func (c *Controller) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := os.ReadFile(c.configFile)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(data)
+}
+
+func (c *Controller) handleAPILogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		fmt.Sscanf(v, "%d", &offset)
+	}
+	reply := make(chan logQueryReply, 1)
+	c.logQueryChan <- logQuery{offset: offset, replyChan: reply}
+	res := <-reply
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"lines": res.lines,
+		"total": res.total,
+	})
 }
 
 func printTestResult(result *runner.TestResult) {

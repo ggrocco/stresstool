@@ -14,11 +14,18 @@
 <div id="nodes-list"><span class="no-nodes">Loading&hellip;</span></div>
 
 <div class="actions">
+  <button id="config-toggle" onclick="toggleConfig()">Show Config</button>
   <button id="check-btn" onclick="refreshNodes()">Check Nodes</button>
   <button id="start-btn" onclick="startTests()" disabled>Start Tests</button>
   <span id="status"></span>
 </div>
-<p class="refresh-hint">You can also type <code>start</code> or <code>nodes</code> in the controller terminal.</p>
+<div id="config-panel" class="config-panel hidden">
+  <pre id="config-content"></pre>
+</div>
+<h2>Logs</h2>
+<div id="logs-panel" class="logs-panel">
+  <pre id="logs-content"></pre>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

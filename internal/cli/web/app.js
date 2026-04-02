@@ -8,7 +8,7 @@ async function refreshNodes() {
       div.innerHTML = '<span class="no-nodes">No nodes connected yet\u2026</span>';
       btn.disabled = true;
     } else {
-      div.innerHTML = data.nodes.map(n => '<div class="node">&#10003; ' + n + '</div>').join('');
+      div.innerHTML = data.nodes.map(n => '<div class="node">&#10003; ' + n.name + (n.addr ? ' <span class="node-addr">' + n.addr + '</span>' : '') + '</div>').join('');
       btn.disabled = false;
     }
   } catch(e) {
@@ -27,7 +27,7 @@ async function startTests() {
     const res = await fetch('/api/start', { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
-      status.textContent = 'Tests started! Monitor progress in the controller terminal.';
+      status.textContent = 'Tests started!';
     } else {
       status.textContent = 'Error: ' + (data.error || 'unknown');
       btn.disabled = false;
@@ -40,5 +40,44 @@ async function startTests() {
   }
 }
 
+async function toggleConfig() {
+  const panel = document.getElementById('config-panel');
+  const btn = document.getElementById('config-toggle');
+  if (!panel.classList.contains('hidden')) {
+    panel.classList.add('hidden');
+    btn.textContent = 'Show Config';
+    return;
+  }
+  try {
+    const res = await fetch('/api/config');
+    const text = await res.text();
+    document.getElementById('config-content').textContent = text;
+    panel.classList.remove('hidden');
+    btn.textContent = 'Hide Config';
+  } catch(e) {
+    document.getElementById('config-content').textContent = 'Error loading config: ' + e.message;
+    panel.classList.remove('hidden');
+    btn.textContent = 'Hide Config';
+  }
+}
+
+let logOffset = 0;
+
+async function refreshLogs() {
+  try {
+    const res = await fetch('/api/logs?offset=' + logOffset);
+    const data = await res.json();
+    if (data.lines && data.lines.length > 0) {
+      const pre = document.getElementById('logs-content');
+      pre.textContent += data.lines.join('\n') + '\n';
+      logOffset = data.total;
+      const panel = document.getElementById('logs-panel');
+      panel.scrollTop = panel.scrollHeight;
+    }
+  } catch(e) { /* ignore */ }
+}
+
 refreshNodes();
+refreshLogs();
 setInterval(refreshNodes, 2000);
+setInterval(refreshLogs, 1000);
