@@ -41,6 +41,12 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 	results := make([]*runner.TestResult, len(cfg.Tests))
 	progressChan := make(chan runner.ProgressUpdate, 100)
 
+	for i, test := range cfg.Tests {
+		fmt.Printf("Test %d (%s): %d RPS, %d threads, %ds duration\n",
+			i+1, test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+	}
+	fmt.Println()
+
 	// Start progress display
 	go displayProgress(progressChan)
 

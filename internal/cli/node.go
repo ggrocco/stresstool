@@ -118,7 +118,7 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 
 	if err := n.config.Validate(); err != nil {
 		fmt.Printf("Config validation failed: %v\n", err)
-		
+
 		// Send error message to controller
 		errorMsg, msgErr := newProtocolMessage(protocol.MsgTypeError, protocol.ErrorMessage{
 			NodeName: n.nodeName,
@@ -129,7 +129,7 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 			fmt.Printf("Failed to build error message: %v\n", msgErr)
 			return
 		}
-		
+
 		if encErr := n.encoder.Encode(errorMsg); encErr != nil {
 			fmt.Printf("Failed to send error message: %v\n", encErr)
 		}
@@ -137,11 +137,9 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 	}
 
 	fmt.Printf("Received test specification with %d test(s)\n", len(n.config.Tests))
-	if n.verbose {
-		for _, test := range n.config.Tests {
-			fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",
-				test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
-		}
+	for _, test := range n.config.Tests {
+		fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",
+			test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
 	}
 
 	// Send ready message
