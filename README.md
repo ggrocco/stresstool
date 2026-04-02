@@ -310,6 +310,137 @@ The script runs:
 - `go list -m -u all` to report outdated dependencies
 - `govulncheck ./...` to find known vulnerabilities in reachable code paths
 
+## Cloud Deployment with Terraform
+
+Terraform configurations are provided for deploying stresstool's controller-node architecture on **AWS**, **GCP**, and **Azure**. Each configuration creates a dedicated network, firewall/security rules, a controller VM, and a configurable number of worker node VMs.
+
+### Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.5
+- Cloud provider CLI authenticated (`aws configure`, `gcloud auth login`, or `az login`)
+
+### Quick Start
+
+```bash
+cd terraform/aws    # or terraform/gcp / terraform/azure
+terraform init
+terraform plan
+terraform apply
+```
+
+### Provider-Specific Variables
+
+#### AWS
+
+| Variable | Description | Default |
+|---|---|---|
+| `aws_region` | AWS region | `us-east-1` |
+| `instance_type` | EC2 instance type | `t3.medium` |
+| `node_count` | Number of worker nodes | `3` |
+| `key_name` | EC2 key pair name (required) | — |
+| `allowed_ssh_cidr` | CIDR allowed to SSH | `0.0.0.0/0` |
+| `controller_port` | Controller listen port | `8090` |
+
+```bash
+terraform apply -var="key_name=my-keypair" -var="node_count=5"
+```
+
+#### GCP
+
+| Variable | Description | Default |
+|---|---|---|
+| `project_id` | GCP project ID (required) | — |
+| `region` | GCP region | `us-central1` |
+| `zone` | GCP zone | `us-central1-a` |
+| `machine_type` | GCE machine type | `e2-medium` |
+| `node_count` | Number of worker nodes | `3` |
+| `allowed_ssh_cidr` | CIDR allowed to SSH | `0.0.0.0/0` |
+| `controller_port` | Controller listen port | `8090` |
+
+```bash
+terraform apply -var="project_id=my-gcp-project"
+```
+
+#### Azure
+
+| Variable | Description | Default |
+|---|---|---|
+| `location` | Azure region | `East US` |
+| `vm_size` | VM size | `Standard_B2s` |
+| `node_count` | Number of worker nodes | `3` |
+| `admin_username` | VM admin user | `azureuser` |
+| `ssh_public_key_path` | Path to SSH public key | `~/.ssh/id_rsa.pub` |
+| `allowed_ssh_cidr` | CIDR allowed to SSH | `0.0.0.0/0` |
+| `controller_port` | Controller listen port | `8090` |
+
+```bash
+terraform apply -var="location=West US 2"
+```
+
+### Opening the Controller Port to the Web
+
+By default, the controller port (8090) is only accessible from within the private network (VPC/VNet). To expose it externally — for example, to connect worker nodes from other networks or to access the controller from the internet:
+
+#### AWS
+
+Add a public ingress rule to the controller security group:
+
+```hcl
+# In terraform/aws/main.tf, add to aws_security_group.controller:
+ingress {
+  description = "Controller port from the web"
+  from_port   = 8090
+  to_port     = 8090
+  protocol    = "tcp"
+  cidr_blocks = ["0.0.0.0/0"]   # or restrict to your IP
+}
+```
+
+#### GCP
+
+Update the firewall source range:
+
+```hcl
+# In terraform/gcp/main.tf, change google_compute_firewall.allow_controller:
+source_ranges = ["0.0.0.0/0"]   # instead of source_tags
+# Remove: source_tags = ["stresstool-node"]
+```
+
+#### Azure
+
+Add an NSG rule for external access:
+
+```hcl
+# In terraform/azure/main.tf, add to azurerm_network_security_group.controller:
+security_rule {
+  name                       = "ControllerWeb"
+  priority                   = 1003
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "Tcp"
+  source_port_range          = "*"
+  destination_port_range     = "8090"
+  source_address_prefix      = "0.0.0.0/0"   # or restrict to your IP
+  destination_address_prefix = "*"
+}
+```
+
+> **Security note:** Exposing the controller port to `0.0.0.0/0` makes it accessible from the entire internet. In production, restrict `allowed_ssh_cidr` and the controller port to known IP ranges.
+
+### Outputs
+
+After `terraform apply`, all providers output:
+
+- **Controller public/private IPs**
+- **Node public/private IPs**
+- **SSH command** to connect to the controller
+
+### Cleanup
+
+```bash
+terraform destroy
+```
+
 ## Architecture Benefits
 
 - **Separation of Concerns**: Controller handles coordination, nodes handle execution
