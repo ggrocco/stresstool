@@ -28,13 +28,18 @@ type Metrics struct {
 	aggregateDone chan struct{}
 }
 
-// NewMetrics creates a new metrics collector and starts the aggregator goroutine
-func NewMetrics() *Metrics {
+// NewMetrics creates a new metrics collector and starts the aggregator goroutine.
+// expectedTotal hints the expected number of requests so buffers can be pre-allocated.
+func NewMetrics(expectedTotal int) *Metrics {
+	chanBuf := expectedTotal
+	if chanBuf < 4096 {
+		chanBuf = 4096
+	}
 	m := &Metrics{
-		Latencies:     make([]time.Duration, 0),
+		Latencies:     make([]time.Duration, 0, expectedTotal),
 		StatusCodes:   make(map[int]int64),
 		Errors:        make(map[string]int64),
-		metricsChan:   make(chan metricEvent, 1000),
+		metricsChan:   make(chan metricEvent, chanBuf),
 		aggregateDone: make(chan struct{}),
 	}
 	go m.aggregate()

@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewMetrics(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 	defer m.Stop()
 
 	if m.TotalRequests != 0 {
@@ -25,7 +25,7 @@ func TestNewMetrics(t *testing.T) {
 }
 
 func TestAddRequest_SuccessCount(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	m.AddRequest(200, 10*time.Millisecond, true)
 	m.AddRequest(200, 20*time.Millisecond, true)
@@ -44,7 +44,7 @@ func TestAddRequest_SuccessCount(t *testing.T) {
 }
 
 func TestAddRequest_AssertionFailure(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	m.AddRequest(200, 10*time.Millisecond, false) // 2xx but assertion failed
 	m.Stop()
@@ -61,7 +61,7 @@ func TestAddRequest_AssertionFailure(t *testing.T) {
 }
 
 func TestAddRequestWithError_RecordsError(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	m.AddRequestWithError(0, 0, false, "connection refused")
 	m.AddRequestWithError(0, 0, false, "connection refused")
@@ -77,7 +77,7 @@ func TestAddRequestWithError_RecordsError(t *testing.T) {
 }
 
 func TestAddRequest_StatusCodeTracking(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	m.AddRequest(200, 1*time.Millisecond, true)
 	m.AddRequest(200, 1*time.Millisecond, true)
@@ -97,7 +97,7 @@ func TestAddRequest_StatusCodeTracking(t *testing.T) {
 }
 
 func TestGetPercentile(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	for i := 1; i <= 100; i++ {
 		m.AddRequest(200, time.Duration(i)*time.Millisecond, true)
@@ -121,7 +121,7 @@ func TestGetPercentile(t *testing.T) {
 }
 
 func TestGetPercentile_Empty(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 	m.Stop()
 
 	if got := m.GetPercentile(0.99); got != 0 {
@@ -130,7 +130,7 @@ func TestGetPercentile_Empty(t *testing.T) {
 }
 
 func TestGetMinMaxAvg(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	m.AddRequest(200, 10*time.Millisecond, true)
 	m.AddRequest(200, 30*time.Millisecond, true)
@@ -150,7 +150,7 @@ func TestGetMinMaxAvg(t *testing.T) {
 }
 
 func TestGetMinMaxAvg_Empty(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 	m.Stop()
 
 	min, max, avg := m.GetMinMaxAvg()
@@ -162,7 +162,7 @@ func TestGetMinMaxAvg_Empty(t *testing.T) {
 // TestConcurrentAdd verifies the channel-based aggregator handles concurrent
 // writes from many goroutines without data races.
 func TestConcurrentAdd(t *testing.T) {
-	m := NewMetrics()
+	m := NewMetrics(0)
 
 	const goroutines = 20
 	const requestsEach = 50

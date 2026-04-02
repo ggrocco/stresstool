@@ -34,10 +34,17 @@ type Runner struct {
 
 // NewRunner creates a new test runner
 func NewRunner(evaluator *placeholders.Evaluator, verbose bool) *Runner {
+	transport := &http.Transport{
+		MaxIdleConns:        200,
+		MaxIdleConnsPerHost: 200,
+		MaxConnsPerHost:     0,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	return &Runner{
 		evaluator: evaluator,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		},
 		verbose: verbose,
 	}
@@ -45,7 +52,8 @@ func NewRunner(evaluator *placeholders.Evaluator, verbose bool) *Runner {
 
 // RunTest executes a single test
 func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) *TestResult {
-	metrics := NewMetrics()
+	expectedTotal := test.RequestsPerSecond * test.RunSeconds
+	metrics := NewMetrics(expectedTotal)
 	assertions := NewAssertions(r.evaluator)
 	result := &TestResult{
 		Test:       test,
@@ -194,10 +202,12 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 	}
 	defer resp.Body.Close()
 
-	// Read body for assertions
+	// Read body for assertions; drain otherwise so the connection is reused
 	var bodyBytes []byte
 	if assertions.shouldReadBody(test.Assert) {
 		bodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // Limit to 1MB
+	} else {
+		io.Copy(io.Discard, resp.Body)
 	}
 
 	// Check assertions

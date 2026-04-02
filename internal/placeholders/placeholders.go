@@ -82,6 +82,10 @@ var placeholderRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 
 // Evaluate replaces all placeholders in a string
 func (e *Evaluator) Evaluate(s string) (string, error) {
+	if !strings.Contains(s, "{{") {
+		return s, nil
+	}
+
 	var firstErr error
 	result := placeholderRegex.ReplaceAllStringFunc(s, func(match string) string {
 		// Extract content between {{ }}
