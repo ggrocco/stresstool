@@ -12,6 +12,7 @@ import (
 	"stresstool/internal/placeholders"
 	"stresstool/internal/protocol"
 	"stresstool/internal/runner"
+	"stresstool/internal/version"
 )
 
 const (
@@ -66,7 +67,7 @@ func (n *Node) start() error {
 	// Send hello message
 	helloMsg, err := newProtocolMessage(protocol.MsgTypeHello, protocol.HelloMessage{
 		NodeName: n.nodeName,
-		Version:  "1.0.0",
+		Version:  version.Version,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to build hello message: %w", err)

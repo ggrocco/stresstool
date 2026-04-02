@@ -5,11 +5,20 @@ This file provides guidance to AI coding agents working with code in this reposi
 ## Build & Development Commands
 
 ```bash
-# Build
+# Build (dev)
 go build -o stresstool ./cmd/stresstool
+
+# Build with version info
+./scripts-build.sh              # auto-detects version from git tags
+./scripts-build.sh v2.0.0       # explicit version
+./scripts-build.sh v2.0.0 bin/  # explicit version + output path
 
 # Install globally
 go install ./cmd/stresstool
+
+# Release (triggered by pushing a tag: git tag v1.x.x && git push origin v1.x.x)
+# GoReleaser cross-compiles for darwin/linux/windows (amd64+arm64) via GitHub Actions
+# Local dry-run: goreleaser release --snapshot --clean
 
 # Run tests
 go test ./...
@@ -52,6 +61,7 @@ internal/
     asserts.go                  -- response assertions (status code, body matching, latency)
   placeholders/placeholders.go  -- {{ }} placeholder evaluation using goja JS runtime (single VM goroutine)
   protocol/protocol.go          -- typed JSON message envelope for controller-node TCP communication
+  version/version.go            -- build version/commit/date injected via ldflags
 proto/api/v1/payload.proto      -- protobuf schema (future gRPC migration path)
 terraform/{aws,gcp,azure}/      -- cloud deployment configs
 ```

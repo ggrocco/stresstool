@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"stresstool/internal/cli"
+	"stresstool/internal/version"
 
 	"github.com/spf13/cobra"
 )
@@ -22,9 +23,18 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "stresstool",
-	Short: "HTTP stress test tool with YAML configuration",
-	Long:  "A command-line HTTP stress test tool that reads YAML configuration files and executes concurrent HTTP requests with assertions.",
+	Use:     "stresstool",
+	Short:   "HTTP stress test tool with YAML configuration",
+	Long:    "A command-line HTTP stress test tool that reads YAML configuration files and executes concurrent HTTP requests with assertions.",
+	Version: version.String(),
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print version, commit, and build date",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println("stresstool " + version.String())
+	},
 }
 
 var runCmd = &cobra.Command{
@@ -114,6 +124,8 @@ func init() {
 	controllerCmd.Flags().BoolVar(&parallel, "parallel", false, "Run tests in parallel on each node")
 	controllerCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
 	rootCmd.AddCommand(controllerCmd)
+
+	rootCmd.AddCommand(versionCmd)
 }
 
 func main() {
