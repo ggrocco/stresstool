@@ -83,6 +83,8 @@ type Controller struct {
 	uiAddr     string
 	configFile string
 	config     *config.Config
+	configYAML []byte // raw YAML for the web UI editor
+	configMu   sync.RWMutex
 	parallel   bool
 	verbose    bool
 	tlsOpts    TLSOptions
@@ -161,14 +163,23 @@ func (c *Controller) runLogManager() {
 
 // RunController starts the controller and waits for nodes to connect.
 func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool, tlsOpts TLSOptions) error {
-	// Load configuration
-	cfg, err := config.LoadConfig(configFile)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
+	var cfg *config.Config
+	var cfgYAML []byte
 
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+	if configFile != "" {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+		parsed, err := config.ParseConfig(data)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := parsed.Validate(); err != nil {
+			return fmt.Errorf("config validation failed: %w", err)
+		}
+		cfg = parsed
+		cfgYAML = data
 	}
 
 	ctrl := &Controller{
@@ -176,6 +187,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		uiAddr:         uiAddr,
 		configFile:     configFile,
 		config:         cfg,
+		configYAML:     cfgYAML,
 		parallel:       parallel,
 		verbose:        verbose,
 		tlsOpts:        tlsOpts,
@@ -408,7 +420,11 @@ func (c *Controller) start() error {
 	go c.runLogManager()
 
 	fmt.Printf("Controller listening on %s (gRPC)\n", c.listenAddr)
-	fmt.Printf("Loaded config with %d test(s)\n", len(c.config.Tests))
+	if c.config != nil {
+		fmt.Printf("Loaded config with %d test(s)\n", len(c.config.Tests))
+	} else {
+		fmt.Println("No config file loaded — configure tests via the web UI")
+	}
 	fmt.Println("\nWaiting for nodes to connect...")
 
 	if c.uiAddr != "" {
@@ -478,6 +494,14 @@ func (c *Controller) startTests() error {
 	atomic.StoreInt32(&c.runActive, 1)
 	defer atomic.StoreInt32(&c.runActive, 0)
 
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
+
+	if cfg == nil {
+		return fmt.Errorf("no config loaded — set a config via the web UI first")
+	}
+
 	// Get a snapshot of current nodes from the state manager
 	nodes := c.queryNodes()
 	if len(nodes) == 0 {
@@ -489,8 +513,8 @@ func (c *Controller) startTests() error {
 	// Build expected results map and tell the state manager
 	expected := make(map[string]map[string]bool, len(nodes))
 	for nodeName := range nodes {
-		expected[nodeName] = make(map[string]bool, len(c.config.Tests))
-		for _, test := range c.config.Tests {
+		expected[nodeName] = make(map[string]bool, len(cfg.Tests))
+		for _, test := range cfg.Tests {
 			expected[nodeName][test.Name] = false
 		}
 	}
@@ -507,7 +531,7 @@ func (c *Controller) startTests() error {
 		awaitReply: awaitReply,
 	}
 
-	pbCfg := protocol.ConfigToProto(c.config)
+	pbCfg := protocol.ConfigToProto(cfg)
 	for nodeName, node := range nodes {
 		msg := &payloadpb.ControllerMessage{
 			Payload: &payloadpb.ControllerMessage_TestSpec{
@@ -754,6 +778,15 @@ func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "tests already running"})
 		return
 	}
+	c.configMu.RLock()
+	hasConfig := c.config != nil
+	c.configMu.RUnlock()
+	if !hasConfig {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no config loaded — save a config first"})
+		return
+	}
 	select {
 	case c.triggerChan <- struct{}{}:
 		w.Header().Set("Content-Type", "application/json")
@@ -791,19 +824,52 @@ func (c *Controller) handleAPIExit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Controller) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	data, err := os.ReadFile(c.configFile)
-	if err != nil {
+	switch r.Method {
+	case http.MethodGet:
+		c.configMu.RLock()
+		data := c.configYAML
+		c.configMu.RUnlock()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if data != nil {
+			w.Write(data)
+		}
+	case http.MethodPost:
+		if atomic.LoadInt32(&c.runActive) != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "cannot update config while tests are running"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "failed to read body"})
+			return
+		}
+		cfg, err := config.ParseConfig(body)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+			return
+		}
+		if err := cfg.Validate(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+			return
+		}
+		c.configMu.Lock()
+		c.config = cfg
+		c.configYAML = body
+		c.configMu.Unlock()
+		c.log("Config updated via web UI (%d test(s))", len(cfg.Tests))
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
-		return
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "tests": len(cfg.Tests)})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write(data)
 }
 
 func (c *Controller) handleAPILogs(w http.ResponseWriter, r *http.Request) {

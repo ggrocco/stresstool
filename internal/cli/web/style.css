@@ -9,15 +9,22 @@ h2 { color: #9cdcfe; font-size: 1rem; margin-top: 28px; }
 .actions { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; margin-top: 8px; }
 button { padding: 8px 18px; font-family: monospace; font-size: 0.9rem; cursor: pointer; border: 1px solid #555; border-radius: 3px; background: #3c3c3c; color: #d4d4d4; box-sizing: border-box; line-height: 1; vertical-align: middle; margin: 0; }
 button:hover:not(:disabled) { border-color: #9cdcfe; color: #9cdcfe; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
 #start-btn { background: #0e4429; border-color: #4ec9b0; color: #4ec9b0; font-weight: bold; }
 #start-btn:hover:not(:disabled) { background: #155c38; }
-#start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .exit-btn { background: #3c1a1a; border-color: #c586c0; color: #c586c0; }
 .exit-btn:hover:not(:disabled) { background: #4a2222; }
 #status { font-size: 0.85rem; color: #ce9178; }
 .refresh-hint { font-size: 0.75rem; color: #555; margin-top: 16px; }
-.config-panel { margin-top: 8px; max-height: 400px; overflow-y: auto; background: #252526; border: 1px solid #3c3c3c; border-radius: 3px; }
-.config-panel pre { margin: 0; padding: 12px; color: #d4d4d4; white-space: pre; font-size: 0.85rem; }
+.config-panel { margin-top: 8px; background: #252526; border: 1px solid #3c3c3c; border-radius: 3px; }
+.config-editor-wrap { padding: 12px; }
+#config-editor { width: 100%; min-height: 260px; background: #1a1a1a; color: #d4d4d4; border: 1px solid #3c3c3c; border-radius: 3px; font-family: monospace; font-size: 0.85rem; padding: 10px; resize: vertical; box-sizing: border-box; tab-size: 2; line-height: 1.5; }
+#config-editor:focus { outline: none; border-color: #4ec9b0; }
+.config-actions { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+#save-config-btn { background: #0e4429; border-color: #4ec9b0; color: #4ec9b0; font-weight: bold; }
+#save-config-btn:hover:not(:disabled) { background: #155c38; }
+.config-status-ok { color: #4ec9b0; font-size: 0.85rem; }
+.config-status-error { color: #f44747; font-size: 0.85rem; }
 .hidden { display: none; }
 #config-toggle { margin: 0; }
 .logs-panel { margin-top: 8px; max-height: 300px; overflow-y: auto; background: #1a1a1a; border: 1px solid #3c3c3c; border-radius: 3px; }

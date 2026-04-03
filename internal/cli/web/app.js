@@ -1,3 +1,5 @@
+let configLoaded = false;
+
 async function refreshNodes() {
   try {
     const res = await fetch('/api/nodes');
@@ -14,6 +16,16 @@ async function refreshNodes() {
   }
 }
 
+async function checkConfigLoaded() {
+  try {
+    const res = await fetch('/api/config');
+    const text = await res.text();
+    configLoaded = text.trim().length > 0;
+  } catch(e) {
+    configLoaded = false;
+  }
+}
+
 async function syncControlsForRunState() {
   try {
     const res = await fetch('/api/run-status');
@@ -22,12 +34,14 @@ async function syncControlsForRunState() {
     const startBtn = document.getElementById('start-btn');
     const stopBtn = document.getElementById('stop-btn');
     const checkBtn = document.getElementById('check-btn');
+    const saveBtn = document.getElementById('save-config-btn');
     const nodesRes = await fetch('/api/nodes');
     const nodesData = await nodesRes.json();
     const hasNodes = nodesData.nodes && nodesData.nodes.length > 0;
     stopBtn.disabled = !active;
     checkBtn.disabled = active;
-    startBtn.disabled = active || !hasNodes;
+    startBtn.disabled = active || !hasNodes || !configLoaded;
+    if (saveBtn) saveBtn.disabled = active;
     return active;
   } catch (e) {
     return false;
@@ -99,19 +113,52 @@ async function toggleConfig() {
   const btn = document.getElementById('config-toggle');
   if (!panel.classList.contains('hidden')) {
     panel.classList.add('hidden');
-    btn.textContent = 'Show Config';
+    btn.textContent = 'Edit Config';
     return;
   }
   try {
     const res = await fetch('/api/config');
     const text = await res.text();
-    document.getElementById('config-content').textContent = text;
+    document.getElementById('config-editor').value = text;
     panel.classList.remove('hidden');
     btn.textContent = 'Hide Config';
   } catch(e) {
-    document.getElementById('config-content').textContent = 'Error loading config: ' + e.message;
+    document.getElementById('config-status').textContent = 'Error loading config: ' + e.message;
     panel.classList.remove('hidden');
     btn.textContent = 'Hide Config';
+  }
+}
+
+async function saveConfig() {
+  const editor = document.getElementById('config-editor');
+  const configStatus = document.getElementById('config-status');
+  const yaml = editor.value;
+  if (!yaml.trim()) {
+    configStatus.textContent = 'Config cannot be empty';
+    configStatus.className = 'config-status-error';
+    return;
+  }
+  configStatus.textContent = 'Saving\u2026';
+  configStatus.className = '';
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: yaml
+    });
+    const data = await res.json();
+    if (data.ok) {
+      configStatus.textContent = 'Saved (' + data.tests + ' test(s))';
+      configStatus.className = 'config-status-ok';
+      configLoaded = true;
+      await syncControlsForRunState();
+    } else {
+      configStatus.textContent = 'Error: ' + (data.error || 'unknown');
+      configStatus.className = 'config-status-error';
+    }
+  } catch(e) {
+    configStatus.textContent = 'Error: ' + e.message;
+    configStatus.className = 'config-status-error';
   }
 }
 
@@ -131,9 +178,11 @@ async function refreshLogs() {
   } catch(e) { /* ignore */ }
 }
 
+checkConfigLoaded();
 refreshNodes();
 refreshLogs();
 syncControlsForRunState();
 setInterval(refreshNodes, 2000);
 setInterval(refreshLogs, 1000);
 setInterval(syncControlsForRunState, 1500);
+setInterval(checkConfigLoaded, 3000);

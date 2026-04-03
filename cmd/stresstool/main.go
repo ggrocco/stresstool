@@ -85,8 +85,8 @@ var controllerCmd = &cobra.Command{
 	Short: "Start controller and coordinate test execution across nodes",
 	Long:  "Start a controller server that loads test configuration, waits for nodes to connect, and coordinates distributed test execution.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if configFile == "" {
-			return fmt.Errorf("config file is required (use -f or --file)")
+		if configFile == "" && !webUI {
+			return fmt.Errorf("config file is required (use -f or --file), or use --web to configure via the UI")
 		}
 
 		uiAddr := ""
@@ -120,8 +120,7 @@ func init() {
 	rootCmd.AddCommand(nodeCmd)
 
 	// Controller command (coordinator)
-	controllerCmd.Flags().StringVarP(&configFile, "file", "f", "", "Path to YAML configuration file (required)")
-	controllerCmd.MarkFlagRequired("file")
+	controllerCmd.Flags().StringVarP(&configFile, "file", "f", "", "Path to YAML configuration file (optional with --web)")
 	controllerCmd.Flags().StringVar(&listenAddr, "listen", ":8090", "Address for controller to listen on")
 	controllerCmd.Flags().BoolVar(&webUI, "web", false, "Enable the web UI for triggering tests")
 	controllerCmd.Flags().IntVar(&webPort, "web-port", 8091, "Port for the web UI server (requires --web)")
