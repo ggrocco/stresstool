@@ -57,6 +57,11 @@ func LoadConfig(filePath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	return ParseConfig(data)
+}
+
+// ParseConfig parses a YAML configuration from raw bytes
+func ParseConfig(data []byte) (*Config, error) {
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)

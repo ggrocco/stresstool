@@ -14,7 +14,7 @@
 <div id="nodes-list"><span class="no-nodes">Loading&hellip;</span></div>
 
 <div class="actions">
-  <button id="config-toggle" onclick="toggleConfig()">Show Config</button>
+  <button id="config-toggle" onclick="toggleConfig()">Edit Config</button>
   <button id="check-btn" onclick="refreshNodes()">Check Nodes</button>
   <button id="start-btn" onclick="startTests()" disabled>Start Tests</button>
   <button id="stop-btn" onclick="stopTests()" disabled>Stop Tests</button>
@@ -22,7 +22,13 @@
   <span id="status"></span>
 </div>
 <div id="config-panel" class="config-panel hidden">
-  <pre id="config-content"></pre>
+  <div class="config-editor-wrap">
+    <textarea id="config-editor" spellcheck="false" placeholder="# Paste or write your YAML config here&#10;tests:&#10;  - name: example&#10;    path: http://localhost:8080/api&#10;    method: GET&#10;    requests_per_second: 10&#10;    threads: 2&#10;    run_seconds: 5"></textarea>
+    <div class="config-actions">
+      <button id="save-config-btn" onclick="saveConfig()">Save Config</button>
+      <span id="config-status"></span>
+    </div>
+  </div>
 </div>
 <h2>Logs</h2>
 <div id="logs-panel" class="logs-panel">
