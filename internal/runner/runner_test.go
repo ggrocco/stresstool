@@ -60,6 +60,7 @@ func makeTest(serverURL, name string, rps, threads, seconds int) *config.Test {
 // ============================================================
 
 func TestRunTest_BasicGET(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "OK")
@@ -93,6 +94,7 @@ func TestRunTest_BasicGET(t *testing.T) {
 }
 
 func TestRunTest_StatusCodeAssertion_Pass(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}))
@@ -113,6 +115,7 @@ func TestRunTest_StatusCodeAssertion_Pass(t *testing.T) {
 }
 
 func TestRunTest_StatusCodeAssertion_Fail(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK) // returns 200, but test expects 201
 	}))
@@ -130,6 +133,7 @@ func TestRunTest_StatusCodeAssertion_Fail(t *testing.T) {
 }
 
 func TestRunTest_BodyContainsAssertion_Pass(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"healthy"}`)
@@ -151,6 +155,7 @@ func TestRunTest_BodyContainsAssertion_Pass(t *testing.T) {
 }
 
 func TestRunTest_BodyContainsAssertion_Fail(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"degraded"}`)
@@ -172,6 +177,7 @@ func TestRunTest_BodyContainsAssertion_Fail(t *testing.T) {
 }
 
 func TestRunTest_MaxLatencyAssertion_Pass(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -189,6 +195,7 @@ func TestRunTest_MaxLatencyAssertion_Pass(t *testing.T) {
 }
 
 func TestRunTest_MaxLatencyAssertion_Fail(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(20 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
@@ -207,6 +214,7 @@ func TestRunTest_MaxLatencyAssertion_Fail(t *testing.T) {
 }
 
 func TestRunTest_ServerErrors_RecordedAsFailures(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -226,6 +234,7 @@ func TestRunTest_ServerErrors_RecordedAsFailures(t *testing.T) {
 }
 
 func TestRunTest_UnreachableServer_RecordsErrors(t *testing.T) {
+	t.Parallel()
 	r := newTestRunner(t, nil)
 	test := makeTest("http://127.0.0.1:1", "unreachable", 5, 1, 1)
 
@@ -240,6 +249,7 @@ func TestRunTest_UnreachableServer_RecordsErrors(t *testing.T) {
 }
 
 func TestRunTest_POSTWithBody(t *testing.T) {
+	t.Parallel()
 	var receivedBody atomic.Value
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +290,7 @@ func TestRunTest_POSTWithBody(t *testing.T) {
 }
 
 func TestRunTest_WithPlaceholderInHeader(t *testing.T) {
+	t.Parallel()
 	var receivedHeader atomic.Value
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +327,7 @@ func TestRunTest_WithPlaceholderInHeader(t *testing.T) {
 }
 
 func TestRunTest_RateLimit_RespectsRPS(t *testing.T) {
+	t.Parallel()
 	var requestCount int64
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -338,6 +350,7 @@ func TestRunTest_RateLimit_RespectsRPS(t *testing.T) {
 }
 
 func TestRunTest_ProgressUpdates(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -375,6 +388,7 @@ func TestRunTest_ProgressUpdates(t *testing.T) {
 }
 
 func TestRunTest_MetricsConsistency(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
