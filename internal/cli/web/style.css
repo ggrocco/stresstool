@@ -29,3 +29,20 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 #config-toggle { margin: 0; }
 .logs-panel { margin-top: 8px; max-height: 300px; overflow-y: auto; background: #1a1a1a; border: 1px solid #3c3c3c; border-radius: 3px; }
 .logs-panel pre { margin: 0; padding: 12px; color: #d4d4d4; white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5; }
+.charts-panel { margin-top: 24px; }
+.chart-container { margin: 12px 0; background: #252526; border: 1px solid #3c3c3c; border-radius: 3px; padding: 12px; overflow: hidden; }
+.chart-row { display: flex; gap: 16px; }
+.chart-container.half { flex: 1; min-width: 0; }
+.chart-title { color: #9cdcfe; font-size: 0.9rem; margin: 0 0 10px 0; font-weight: normal; }
+.chart-empty { color: #6a9955; font-style: italic; font-size: 0.85rem; }
+.bar-chart { display: flex; flex-direction: column; gap: 6px; }
+.bar-group { margin-bottom: 10px; }
+.bar-label { color: #d4d4d4; font-size: 0.8rem; margin-bottom: 4px; }
+.bar-row { display: flex; align-items: center; gap: 8px; height: 22px; }
+.bar-tag { color: #808080; font-size: 0.75rem; min-width: 36px; text-align: right; flex-shrink: 0; }
+.bar-tag-wide { min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { flex: 1; height: 16px; background: #1a1a1a; border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s ease; }
+.bar-value { color: #d4d4d4; font-size: 0.75rem; min-width: 70px; flex-shrink: 0; }
+.u-wrap { background: transparent !important; }
+@media (max-width: 600px) { .chart-row { flex-direction: column; } .chart-container.half { flex: none; } .bar-tag-wide { min-width: 100px; } }

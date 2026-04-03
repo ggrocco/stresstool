@@ -62,6 +62,8 @@ type queryKind int
 const (
 	queryNodes queryKind = iota
 	queryFinalState
+	queryResults
+	queryProgressSeries
 )
 
 // stateQuery is sent over queryChan to request a synchronous read from the state manager
@@ -72,9 +74,10 @@ type stateQuery struct {
 
 // stateQueryReply carries the response to a stateQuery
 type stateQueryReply struct {
-	nodes      map[string]*NodeConnection
-	results    map[string]map[string]*runner.TestResult
-	nodeErrors map[string]*protocol.ErrorMessage
+	nodes          map[string]*NodeConnection
+	results        map[string]map[string]*runner.TestResult
+	nodeErrors     map[string]*protocol.ErrorMessage
+	progressSeries map[string]map[string][]*protocol.ProgressMessage
 }
 
 // Controller manages test execution across multiple nodes
@@ -209,6 +212,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 func (c *Controller) runStateManager() {
 	nodes := make(map[string]*NodeConnection)
 	progress := make(map[string]map[string]*protocol.ProgressMessage)
+	progressSeries := make(map[string]map[string][]*protocol.ProgressMessage)
 	results := make(map[string]map[string]*runner.TestResult)
 	nodeErrors := make(map[string]*protocol.ErrorMessage)
 	var lineCount int
@@ -267,6 +271,10 @@ func (c *Controller) runStateManager() {
 					progress[p.NodeName] = make(map[string]*protocol.ProgressMessage)
 				}
 				progress[p.NodeName][p.TestName] = p
+				if _, ok := progressSeries[p.NodeName]; !ok {
+					progressSeries[p.NodeName] = make(map[string][]*protocol.ProgressMessage)
+				}
+				progressSeries[p.NodeName][p.TestName] = append(progressSeries[p.NodeName][p.TestName], p)
 
 				// Log progress to web UI
 				prefix := fmt.Sprintf("%s / %s", p.NodeName, p.TestName)
@@ -326,6 +334,7 @@ func (c *Controller) runStateManager() {
 				c.completionMu.Unlock()
 				for nodeName := range expectedResults {
 					delete(progress, nodeName)
+					delete(progressSeries, nodeName)
 					delete(results, nodeName)
 					delete(nodeErrors, nodeName)
 				}
@@ -376,6 +385,25 @@ func (c *Controller) runStateManager() {
 					errCopy[k] = v
 				}
 				query.replyChan <- stateQueryReply{results: resCopy, nodeErrors: errCopy}
+
+			case queryResults:
+				resCopy := make(map[string]map[string]*runner.TestResult, len(results))
+				for k, v := range results {
+					resCopy[k] = v
+				}
+				query.replyChan <- stateQueryReply{results: resCopy}
+
+			case queryProgressSeries:
+				psCopy := make(map[string]map[string][]*protocol.ProgressMessage, len(progressSeries))
+				for node, tests := range progressSeries {
+					psCopy[node] = make(map[string][]*protocol.ProgressMessage, len(tests))
+					for test, msgs := range tests {
+						cp := make([]*protocol.ProgressMessage, len(msgs))
+						copy(cp, msgs)
+						psCopy[node][test] = cp
+					}
+				}
+				query.replyChan <- stateQueryReply{progressSeries: psCopy}
 			}
 		}
 	}
@@ -703,6 +731,8 @@ func (c *Controller) startUIServer() {
 	mux.HandleFunc("/api/exit", c.handleAPIExit)
 	mux.HandleFunc("/api/run-status", c.handleAPIRunStatus)
 	mux.HandleFunc("/api/config", c.handleAPIConfig)
+	mux.HandleFunc("/api/results", c.handleAPIResults)
+	mux.HandleFunc("/api/progress-series", c.handleAPIProgressSeries)
 	mux.HandleFunc("/api/logs", c.handleAPILogs)
 
 	srv := &http.Server{Addr: c.uiAddr, Handler: mux}
@@ -806,6 +836,105 @@ func (c *Controller) handleAPIRunStatus(w http.ResponseWriter, r *http.Request) 
 	active := atomic.LoadInt32(&c.runActive) != 0
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"run_active": active})
+}
+
+func (c *Controller) handleAPIResults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	reply := make(chan stateQueryReply, 1)
+	c.queryChan <- stateQuery{kind: queryResults, replyChan: reply}
+	data := <-reply
+
+	type latencyStats struct {
+		MinMs float64 `json:"min_ms"`
+		MaxMs float64 `json:"max_ms"`
+		AvgMs float64 `json:"avg_ms"`
+		P50Ms float64 `json:"p50_ms"`
+		P95Ms float64 `json:"p95_ms"`
+		P99Ms float64 `json:"p99_ms"`
+	}
+	type testResultJSON struct {
+		Passed            bool             `json:"passed"`
+		StoppedEarly      bool             `json:"stopped_early"`
+		TotalRequests     int64            `json:"total_requests"`
+		SuccessCount      int64            `json:"success_count"`
+		FailureCount      int64            `json:"failure_count"`
+		AssertionFailures int64            `json:"assertion_failures"`
+		Latency           latencyStats     `json:"latency_ms"`
+		StatusCodes       map[string]int64 `json:"status_codes"`
+		Errors            map[string]int64 `json:"errors"`
+	}
+
+	out := make(map[string]map[string]*testResultJSON)
+	for nodeName, tests := range data.results {
+		out[nodeName] = make(map[string]*testResultJSON)
+		for testName, result := range tests {
+			m := result.Metrics
+			minL, maxL, avgL := m.GetMinMaxAvg()
+			sc := make(map[string]int64, len(m.StatusCodes))
+			for code, count := range m.StatusCodes {
+				sc[fmt.Sprintf("%d", code)] = count
+			}
+			out[nodeName][testName] = &testResultJSON{
+				Passed:            result.Passed,
+				StoppedEarly:      result.StoppedEarly,
+				TotalRequests:     m.TotalRequests,
+				SuccessCount:      m.SuccessCount,
+				FailureCount:      m.FailureCount,
+				AssertionFailures: m.AssertionFailures,
+				Latency: latencyStats{
+					MinMs: float64(minL.Microseconds()) / 1000.0,
+					MaxMs: float64(maxL.Microseconds()) / 1000.0,
+					AvgMs: float64(avgL.Microseconds()) / 1000.0,
+					P50Ms: float64(m.GetPercentile(0.50).Microseconds()) / 1000.0,
+					P95Ms: float64(m.GetPercentile(0.95).Microseconds()) / 1000.0,
+					P99Ms: float64(m.GetPercentile(0.99).Microseconds()) / 1000.0,
+				},
+				StatusCodes: sc,
+				Errors:      m.Errors,
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"results": out})
+}
+
+func (c *Controller) handleAPIProgressSeries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	reply := make(chan stateQueryReply, 1)
+	c.queryChan <- stateQuery{kind: queryProgressSeries, replyChan: reply}
+	data := <-reply
+
+	type progressPoint struct {
+		ElapsedS float64 `json:"elapsed_s"`
+		Total    int64   `json:"total"`
+		Failures int64   `json:"failures"`
+		RPS      float64 `json:"rps"`
+	}
+
+	out := make(map[string]map[string][]*progressPoint)
+	for nodeName, tests := range data.progressSeries {
+		out[nodeName] = make(map[string][]*progressPoint)
+		for testName, msgs := range tests {
+			points := make([]*progressPoint, len(msgs))
+			for i, m := range msgs {
+				points[i] = &progressPoint{
+					ElapsedS: m.Elapsed,
+					Total:    m.Total,
+					Failures: m.Failures,
+					RPS:      m.RPS,
+				}
+			}
+			out[nodeName][testName] = points
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"series": out})
 }
 
 func (c *Controller) handleAPIExit(w http.ResponseWriter, r *http.Request) {
