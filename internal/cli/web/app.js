@@ -162,6 +162,47 @@ async function saveConfig() {
   }
 }
 
+let wasRunActive = false;
+
+async function refreshCharts() {
+  try {
+    const statusRes = await fetch('/api/run-status');
+    const statusData = await statusRes.json();
+    const active = statusData.run_active === true;
+    const panel = document.getElementById('charts-panel');
+
+    if (active) {
+      // While running, show real-time RPS chart from progress series
+      wasRunActive = true;
+      panel.classList.remove('hidden');
+      const psRes = await fetch('/api/progress-series');
+      const psData = await psRes.json();
+      if (psData.series && Object.keys(psData.series).length > 0) {
+        renderRPSChart(psData.series, document.getElementById('chart-rps'));
+      }
+    } else if (wasRunActive) {
+      // Run just finished — fetch final results and full progress series
+      wasRunActive = false;
+      panel.classList.remove('hidden');
+      const [psRes, resRes] = await Promise.all([
+        fetch('/api/progress-series'),
+        fetch('/api/results')
+      ]);
+      const psData = await psRes.json();
+      const resData = await resRes.json();
+
+      if (psData.series && Object.keys(psData.series).length > 0) {
+        renderRPSChart(psData.series, document.getElementById('chart-rps'));
+      }
+      if (resData.results && Object.keys(resData.results).length > 0) {
+        renderLatencyChart(resData.results, document.getElementById('chart-latency'));
+        renderStatusCodeChart(resData.results, document.getElementById('chart-status-codes'));
+        renderErrorChart(resData.results, document.getElementById('chart-errors'));
+      }
+    }
+  } catch(e) { /* ignore */ }
+}
+
 let logOffset = 0;
 
 async function refreshLogs() {
@@ -186,3 +227,4 @@ setInterval(refreshNodes, 2000);
 setInterval(refreshLogs, 1000);
 setInterval(syncControlsForRunState, 1500);
 setInterval(checkConfigLoaded, 3000);
+setInterval(refreshCharts, 2000);

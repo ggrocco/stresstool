@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stresstool Controller</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/uplot.min.css">
 </head>
 <body>
 <h1>Stresstool Controller</h1>
@@ -30,11 +31,22 @@
     </div>
   </div>
 </div>
+<div id="charts-panel" class="charts-panel hidden">
+  <h2>Test Results</h2>
+  <div id="chart-rps" class="chart-container"></div>
+  <div id="chart-latency" class="chart-container"></div>
+  <div class="chart-row">
+    <div id="chart-status-codes" class="chart-container half"></div>
+    <div id="chart-errors" class="chart-container half"></div>
+  </div>
+</div>
 <h2>Logs</h2>
 <div id="logs-panel" class="logs-panel">
   <pre id="logs-content"></pre>
 </div>
 
+<script src="/static/uplot.iife.min.js"></script>
+<script src="/static/charts.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
