@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -94,12 +97,21 @@ type Controller struct {
 	quitChan chan struct{}
 	// triggerChan receives a signal from the UI to start tests
 	triggerChan chan struct{}
+	// exitChan requests graceful shutdown (web API); buffered so the HTTP handler can return first.
+	exitChan chan struct{}
+
+	// runActive is 1 while a distributed test run is in progress (for /api/run-status and start gating).
+	runActive int32
 
 	logChan      chan string
 	logQueryChan chan logQuery
 
 	// grpcServer is set while the distributed gRPC server runs; used for graceful shutdown.
 	grpcServer *grpc.Server
+
+	completionMu   sync.Mutex
+	uiMu           sync.Mutex
+	uiServer       *http.Server
 }
 
 // NodeConnection represents a connected node (gRPC session).
@@ -172,6 +184,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		completionChan: make(chan struct{}),
 		quitChan:       make(chan struct{}),
 		triggerChan:    make(chan struct{}, 1),
+		exitChan:       make(chan struct{}, 1),
 		logChan:        make(chan string, 100),
 		logQueryChan:   make(chan logQuery),
 	}
@@ -210,7 +223,10 @@ func (c *Controller) runStateManager() {
 		}
 		if stateIsComplete(expectedResults, results, nodeErrors) {
 			completionSignaled = true
-			close(c.completionChan)
+			c.completionMu.Lock()
+			ch := c.completionChan
+			c.completionMu.Unlock()
+			close(ch)
 		}
 	}
 
@@ -292,6 +308,15 @@ func (c *Controller) runStateManager() {
 
 			case evSetExpected:
 				expectedResults = event.expectedResults
+				completionSignaled = false
+				c.completionMu.Lock()
+				c.completionChan = make(chan struct{})
+				c.completionMu.Unlock()
+				for nodeName := range expectedResults {
+					delete(progress, nodeName)
+					delete(results, nodeName)
+					delete(nodeErrors, nodeName)
+				}
 				checkCompletion()
 
 			case evNodeReady:
@@ -389,6 +414,7 @@ func (c *Controller) start() error {
 	if c.uiAddr != "" {
 		go c.startUIServer()
 		fmt.Printf("UI available at http://%s — use the web interface to check nodes and start tests\n", c.uiAddr)
+		fmt.Println("When finished, use the web UI Exit button or POST /api/exit to shut down (or Ctrl+C).")
 		fmt.Println("Press Ctrl+C to cancel, or type 'start' / 'nodes' in this terminal as well.")
 	} else {
 		fmt.Println("Press Ctrl+C to cancel, or wait for nodes and then type 'start' to begin tests")
@@ -413,7 +439,12 @@ func (c *Controller) runControllerLoop() error {
 		case input := <-inputChan:
 			switch input {
 			case "start":
-				return c.startTests()
+				if err := c.startTests(); err != nil {
+					c.log("Start error: %v", err)
+				}
+				if c.uiAddr == "" {
+					return nil
+				}
 			case "nodes":
 				c.printConnectedNodes()
 			default:
@@ -421,7 +452,15 @@ func (c *Controller) runControllerLoop() error {
 			}
 		case <-c.triggerChan:
 			c.log("Start triggered via UI...")
-			return c.startTests()
+			if err := c.startTests(); err != nil {
+				c.log("Start error: %v", err)
+			}
+			if c.uiAddr == "" {
+				return nil
+			}
+		case <-c.exitChan:
+			c.log("Exit requested via web API...")
+			return c.gracefulShutdownExit()
 		}
 	}
 }
@@ -436,6 +475,9 @@ func (c *Controller) printConnectedNodes() {
 }
 
 func (c *Controller) startTests() error {
+	atomic.StoreInt32(&c.runActive, 1)
+	defer atomic.StoreInt32(&c.runActive, 0)
+
 	// Get a snapshot of current nodes from the state manager
 	nodes := c.queryNodes()
 	if len(nodes) == 0 {
@@ -506,11 +548,32 @@ func (c *Controller) startTests() error {
 	}
 
 	// Block until the state manager signals completion (event-driven, no polling)
-	<-c.completionChan
+	c.completionMu.Lock()
+	ch := c.completionChan
+	c.completionMu.Unlock()
+	<-ch
 
 	// Print final summary (also moves terminal cursor down past progress lines)
 	c.printFinalSummary()
 
+	webMode := c.uiAddr != ""
+	if webMode {
+		c.log("Run complete. Web UI stays up — start again from the UI or type 'start' here, or use Exit / POST /api/exit to shut down.")
+		return nil
+	}
+
+	c.sendCompleteToNodes(nodes)
+
+	// Let per-session send goroutines flush Complete before we tear down state or exit the process.
+	time.Sleep(750 * time.Millisecond)
+
+	// Stop the state manager
+	c.quitChan <- struct{}{}
+
+	return nil
+}
+
+func (c *Controller) sendCompleteToNodes(nodes map[string]*NodeConnection) {
 	for nodeName, node := range nodes {
 		completeMsg := &payloadpb.ControllerMessage{
 			Payload: &payloadpb.ControllerMessage_Complete{Complete: &payloadpb.CompleteMessage{}},
@@ -521,14 +584,28 @@ func (c *Controller) startTests() error {
 			fmt.Printf("Failed to enqueue complete signal for %s\n", nodeName)
 		}
 	}
+}
 
-	// Let per-session send goroutines flush Complete before we tear down state or exit the process.
+func (c *Controller) gracefulShutdownExit() error {
+	nodes := c.queryNodes()
+	c.sendCompleteToNodes(nodes)
 	time.Sleep(750 * time.Millisecond)
-
-	// Stop the state manager
 	c.quitChan <- struct{}{}
-
+	c.shutdownUI()
 	return nil
+}
+
+func (c *Controller) shutdownUI() {
+	c.uiMu.Lock()
+	srv := c.uiServer
+	c.uiServer = nil
+	c.uiMu.Unlock()
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 }
 
 func (c *Controller) printFinalSummary() {
@@ -599,10 +676,16 @@ func (c *Controller) startUIServer() {
 	mux.HandleFunc("/api/nodes", c.handleAPINodes)
 	mux.HandleFunc("/api/start", c.handleAPIStart)
 	mux.HandleFunc("/api/stop", c.handleAPIStop)
+	mux.HandleFunc("/api/exit", c.handleAPIExit)
+	mux.HandleFunc("/api/run-status", c.handleAPIRunStatus)
 	mux.HandleFunc("/api/config", c.handleAPIConfig)
 	mux.HandleFunc("/api/logs", c.handleAPILogs)
 
-	if err := http.ListenAndServe(c.uiAddr, mux); err != nil {
+	srv := &http.Server{Addr: c.uiAddr, Handler: mux}
+	c.uiMu.Lock()
+	c.uiServer = srv
+	c.uiMu.Unlock()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Printf("UI server error: %v\n", err)
 	}
 }
@@ -665,6 +748,12 @@ func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if atomic.LoadInt32(&c.runActive) != 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "tests already running"})
+		return
+	}
 	select {
 	case c.triggerChan <- struct{}{}:
 		w.Header().Set("Content-Type", "application/json")
@@ -674,6 +763,31 @@ func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "start already triggered or tests already running"})
 	}
+}
+
+func (c *Controller) handleAPIRunStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	active := atomic.LoadInt32(&c.runActive) != 0
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"run_active": active})
+}
+
+func (c *Controller) handleAPIExit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	go func() {
+		select {
+		case c.exitChan <- struct{}{}:
+		default:
+		}
+	}()
 }
 
 func (c *Controller) handleAPIConfig(w http.ResponseWriter, r *http.Request) {

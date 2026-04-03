@@ -3,16 +3,34 @@ async function refreshNodes() {
     const res = await fetch('/api/nodes');
     const data = await res.json();
     const div = document.getElementById('nodes-list');
-    const btn = document.getElementById('start-btn');
     if (!data.nodes || data.nodes.length === 0) {
       div.innerHTML = '<span class="no-nodes">No nodes connected yet\u2026</span>';
-      btn.disabled = true;
     } else {
       div.innerHTML = data.nodes.map(n => '<div class="node">&#10003; ' + n.name + (n.addr ? ' <span class="node-addr">' + n.addr + '</span>' : '') + '</div>').join('');
-      btn.disabled = false;
     }
+    await syncControlsForRunState();
   } catch(e) {
     document.getElementById('status').textContent = 'Error fetching nodes: ' + e.message;
+  }
+}
+
+async function syncControlsForRunState() {
+  try {
+    const res = await fetch('/api/run-status');
+    const data = await res.json();
+    const active = data.run_active === true;
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const checkBtn = document.getElementById('check-btn');
+    const nodesRes = await fetch('/api/nodes');
+    const nodesData = await nodesRes.json();
+    const hasNodes = nodesData.nodes && nodesData.nodes.length > 0;
+    stopBtn.disabled = !active;
+    checkBtn.disabled = active;
+    startBtn.disabled = active || !hasNodes;
+    return active;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -32,15 +50,11 @@ async function startTests() {
       status.textContent = 'Tests started!';
     } else {
       status.textContent = 'Error: ' + (data.error || 'unknown');
-      btn.disabled = false;
-      stopBtn.disabled = true;
-      checkBtn.disabled = false;
+      await syncControlsForRunState();
     }
   } catch(e) {
     status.textContent = 'Error: ' + e.message;
-    btn.disabled = false;
-    stopBtn.disabled = true;
-    checkBtn.disabled = false;
+    await syncControlsForRunState();
   }
 }
 
@@ -56,6 +70,26 @@ async function stopTests() {
       status.textContent = 'Error: ' + (data.error || 'unknown');
     }
   } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+  await syncControlsForRunState();
+}
+
+async function exitController() {
+  if (!confirm('Shut down the controller? Nodes will disconnect (same as a non-web run finishing).')) {
+    return;
+  }
+  const status = document.getElementById('status');
+  status.textContent = 'Sending exit\u2026';
+  try {
+    const res = await fetch('/api/exit', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      status.textContent = 'Exit sent. This page will stop responding shortly.';
+    } else {
+      status.textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  } catch (e) {
     status.textContent = 'Error: ' + e.message;
   }
 }
@@ -99,5 +133,7 @@ async function refreshLogs() {
 
 refreshNodes();
 refreshLogs();
+syncControlsForRunState();
 setInterval(refreshNodes, 2000);
 setInterval(refreshLogs, 1000);
+setInterval(syncControlsForRunState, 1500);

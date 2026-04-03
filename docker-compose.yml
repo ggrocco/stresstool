@@ -7,7 +7,8 @@
 #   docker compose --profile auto-start up --build
 #
 # Controller: gRPC :8090, web UI :8091. With profile `auto-start`, the starter
-# service waits 15s then POSTs /api/start. When the run finishes, the controller exits.
+# waits 15s, POSTs /api/start, polls /api/run-status until the run finishes, then
+# POSTs /api/exit so the controller shuts down (nodes disconnect).
 #
 services:
   controller:
@@ -76,7 +77,21 @@ services:
         echo "POST /api/start"
         curl -sfS -X POST "http://controller:8091/api/start"
         echo ""
-        echo "Start signal sent. Watch controller logs for progress."
+        echo "Waiting for run to start..."
+        i=0
+        while ! curl -sfS "http://controller:8091/api/run-status" | grep -q '"run_active":true'; do
+          sleep 1
+          i=$((i + 1))
+          if [ "$i" -gt 120 ]; then echo "timeout waiting for run_active"; exit 1; fi
+        done
+        echo "Run active; waiting for completion..."
+        while curl -sfS "http://controller:8091/api/run-status" | grep -q '"run_active":true'; do
+          sleep 2
+        done
+        echo "POST /api/exit"
+        curl -sfS -X POST "http://controller:8091/api/exit"
+        echo ""
+        echo "Exit sent; controller is shutting down."
 
 networks:
   default:
