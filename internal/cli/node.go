@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
@@ -84,6 +86,10 @@ func RunNode(nodeName, controllerAddr string, verbose bool, tlsOpts TLSOptions) 
 		in, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
+				return nil
+			}
+			if st, ok := status.FromError(err); ok && st.Code() == codes.Unavailable {
+				// Controller process exited or closed the transport without a clean gRPC status.
 				return nil
 			}
 			return fmt.Errorf("receive from controller: %w", err)

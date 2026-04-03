@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -145,6 +146,9 @@ func listenAndServeGRPC(c *Controller, tlsOpts TLSOptions) error {
 	}
 
 	srv := grpc.NewServer(opts...)
+	c.grpcServer = srv
+	defer c.shutdownGRPC()
+
 	payloadpb.RegisterStressTestServiceServer(srv, &grpcStressService{c: c})
 
 	go func() {
@@ -154,4 +158,23 @@ func listenAndServeGRPC(c *Controller, tlsOpts TLSOptions) error {
 	}()
 
 	return c.runControllerLoop()
+}
+
+func (c *Controller) shutdownGRPC() {
+	srv := c.grpcServer
+	if srv == nil {
+		return
+	}
+	c.grpcServer = nil
+
+	done := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		srv.Stop()
+	}
 }

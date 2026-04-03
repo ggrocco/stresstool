@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"stresstool/internal/config"
 	"stresstool/internal/protocol"
 	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
@@ -95,6 +97,9 @@ type Controller struct {
 
 	logChan      chan string
 	logQueryChan chan logQuery
+
+	// grpcServer is set while the distributed gRPC server runs; used for graceful shutdown.
+	grpcServer *grpc.Server
 }
 
 // NodeConnection represents a connected node (gRPC session).
@@ -516,6 +521,9 @@ func (c *Controller) startTests() error {
 			fmt.Printf("Failed to enqueue complete signal for %s\n", nodeName)
 		}
 	}
+
+	// Let per-session send goroutines flush Complete before we tear down state or exit the process.
+	time.Sleep(750 * time.Millisecond)
 
 	// Stop the state manager
 	c.quitChan <- struct{}{}
