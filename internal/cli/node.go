@@ -1,41 +1,28 @@
 package cli
 
 import (
-	"bufio"
-	"encoding/json"
+	"context"
 	"fmt"
-	"net"
+	"io"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
 	"stresstool/internal/protocol"
+	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
 	"stresstool/internal/runner"
 	"stresstool/internal/version"
 )
 
-const (
-	// maxResultSendRetries is the maximum number of attempts to send a test result to the controller
-	maxResultSendRetries = 3
-)
+const nodeGRPCMaxMsgBytes = 64 << 20
 
-// Node represents a worker node that executes tests
-type Node struct {
-	nodeName       string
-	controllerAddr string
-	verbose        bool
-
-	conn    net.Conn
-	encoder *json.Encoder
-	decoder *json.Decoder
-
-	config   *config.Config
-	parallel bool
-}
-
-// RunNode starts a node and connects to the controller
-func RunNode(nodeName, controllerAddr string, verbose bool) error {
+// RunNode connects to the controller via gRPC and runs a worker session.
+func RunNode(nodeName, controllerAddr string, verbose bool, tlsOpts TLSOptions) error {
 	if nodeName == "" {
 		return fmt.Errorf("node name is required")
 	}
@@ -43,97 +30,143 @@ func RunNode(nodeName, controllerAddr string, verbose bool) error {
 		return fmt.Errorf("controller address is required")
 	}
 
-	node := &Node{
-		nodeName:       nodeName,
-		controllerAddr: controllerAddr,
-		verbose:        verbose,
+	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(nodeGRPCMaxMsgBytes),
+			grpc.MaxCallSendMsgSize(nodeGRPCMaxMsgBytes),
+		),
+	}
+	tlsConf, err := ClientTLSConfig(tlsOpts)
+	if err != nil {
+		return err
+	}
+	if tlsConf != nil {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConf)))
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	return node.start()
-}
-
-func (n *Node) start() error {
-	// Connect to controller
-	conn, err := net.Dial("tcp", n.controllerAddr)
+	conn, err := grpc.NewClient(controllerAddr, dialOpts...)
 	if err != nil {
-		return fmt.Errorf("failed to connect to controller at %s: %w", n.controllerAddr, err)
+		return fmt.Errorf("connect to controller at %s: %w", controllerAddr, err)
 	}
 	defer conn.Close()
 
-	n.conn = conn
-	n.encoder = json.NewEncoder(conn)
-	n.decoder = json.NewDecoder(bufio.NewReader(conn))
-
-	// Send hello message
-	helloMsg, err := newProtocolMessage(protocol.MsgTypeHello, protocol.HelloMessage{
-		NodeName: n.nodeName,
-		Version:  version.Version,
-	})
+	client := payloadpb.NewStressTestServiceClient(conn)
+	stream, err := client.Session(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to build hello message: %w", err)
+		return fmt.Errorf("open session: %w", err)
 	}
 
-	if err := n.encoder.Encode(helloMsg); err != nil {
-		return fmt.Errorf("failed to send hello message: %w", err)
+	ns := &nodeStream{stream: stream}
+
+	if err := ns.Send(&payloadpb.NodeMessage{
+		Payload: &payloadpb.NodeMessage_Hello{
+			Hello: &payloadpb.HelloMessage{NodeName: nodeName, Version: version.Version},
+		},
+	}); err != nil {
+		return fmt.Errorf("send hello: %w", err)
 	}
 
-	fmt.Printf("Connected to controller at %s as node '%s'\n", n.controllerAddr, n.nodeName)
+	fmt.Printf("Connected to controller at %s as node '%s'\n", controllerAddr, nodeName)
 	fmt.Println("Waiting for test specifications from controller...")
 
-	// Listen for messages from controller
-	return n.handleMessages()
-}
+	n := &grpcWorker{
+		nodeName: nodeName,
+		verbose:  verbose,
+		send:     ns.Send,
+	}
 
-func (n *Node) handleMessages() error {
-	for n.decoder.More() {
-		var msg protocol.Message
-		if err := n.decoder.Decode(&msg); err != nil {
-			return fmt.Errorf("failed to decode message: %w", err)
+	var testMu sync.Mutex
+	var testCancel context.CancelFunc
+
+	for {
+		in, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("receive from controller: %w", err)
 		}
 
-		switch msg.Type {
-		case protocol.MsgTypeTestSpec:
-			specData, err := decodeProtocolMessageData[protocol.TestSpecMessage](msg)
-			if err != nil {
-				return fmt.Errorf("failed to parse test spec: %w", err)
-			}
-			n.handleTestSpec(specData)
+		switch p := in.GetPayload().(type) {
+		case *payloadpb.ControllerMessage_TestSpec:
+			n.handleTestSpec(p.TestSpec)
 
-		case protocol.MsgTypeStartTests:
-			if err := n.executeTests(); err != nil {
-				return fmt.Errorf("failed to execute tests: %w", err)
+		case *payloadpb.ControllerMessage_StartTests:
+			testMu.Lock()
+			if testCancel != nil {
+				testCancel()
+				testCancel = nil
 			}
+			ctx, cancel := context.WithCancel(context.Background())
+			testCancel = cancel
+			testMu.Unlock()
 
-		case protocol.MsgTypeComplete:
+			go func() {
+				runErr := n.executeTests(ctx)
+				testMu.Lock()
+				testCancel = nil
+				testMu.Unlock()
+				if runErr != nil && verbose {
+					fmt.Printf("Test execution error: %v\n", runErr)
+				}
+			}()
+
+		case *payloadpb.ControllerMessage_StopTests:
+			testMu.Lock()
+			if testCancel != nil {
+				testCancel()
+			}
+			testMu.Unlock()
+
+		case *payloadpb.ControllerMessage_Complete:
 			fmt.Println("All tests complete. Disconnecting...")
 			return nil
 		}
 	}
-
-	return nil
 }
 
-func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
-	n.config = spec.Config.WithNodeOverrides(spec.NodeName)
-	n.parallel = spec.Parallel
+type nodeStream struct {
+	mu     sync.Mutex
+	stream grpc.BidiStreamingClient[payloadpb.NodeMessage, payloadpb.ControllerMessage]
+}
+
+func (ns *nodeStream) Send(m *payloadpb.NodeMessage) error {
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+	return ns.stream.Send(m)
+}
+
+type grpcWorker struct {
+	nodeName string
+	verbose  bool
+	send     func(*payloadpb.NodeMessage) error
+
+	config   *config.Config
+	parallel bool
+}
+
+func (n *grpcWorker) handleTestSpec(spec *payloadpb.TestSpecMessage) {
+	cfg, err := protocol.ConfigFromProto(spec.GetConfig())
+	if err != nil {
+		fmt.Printf("Failed to parse config: %v\n", err)
+		return
+	}
+	n.config = cfg.WithNodeOverrides(spec.GetNodeName())
+	n.parallel = spec.GetParallel()
 
 	if err := n.config.Validate(); err != nil {
 		fmt.Printf("Config validation failed: %v\n", err)
-
-		// Send error message to controller
-		errorMsg, msgErr := newProtocolMessage(protocol.MsgTypeError, protocol.ErrorMessage{
-			NodeName: n.nodeName,
-			Error:    err.Error(),
-			Phase:    "validation",
+		_ = n.send(&payloadpb.NodeMessage{
+			Payload: &payloadpb.NodeMessage_Error{
+				Error: &payloadpb.ErrorMessage{
+					NodeName: n.nodeName,
+					Error:    err.Error(),
+					Phase:    "validation",
+				},
+			},
 		})
-		if msgErr != nil {
-			fmt.Printf("Failed to build error message: %v\n", msgErr)
-			return
-		}
-
-		if encErr := n.encoder.Encode(errorMsg); encErr != nil {
-			fmt.Printf("Failed to send error message: %v\n", encErr)
-		}
 		return
 	}
 
@@ -143,50 +176,35 @@ func (n *Node) handleTestSpec(spec *protocol.TestSpecMessage) {
 			test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
 	}
 
-	// Send ready message
-	readyMsg, err := newProtocolMessage(protocol.MsgTypeReady, protocol.ReadyMessage{NodeName: n.nodeName})
-	if err != nil {
-		fmt.Printf("Failed to build ready message: %v\n", err)
-		if n.conn != nil {
-			_ = n.conn.Close()
-		}
-		return
-	}
-
-	if err := n.encoder.Encode(readyMsg); err != nil {
+	if err := n.send(&payloadpb.NodeMessage{
+		Payload: &payloadpb.NodeMessage_Ready{
+			Ready: &payloadpb.ReadyMessage{NodeName: n.nodeName},
+		},
+	}); err != nil {
 		fmt.Printf("Failed to send ready message: %v\n", err)
-		if n.conn != nil {
-			_ = n.conn.Close()
-		}
 		return
 	}
 
 	fmt.Println("Ready to start tests. Waiting for start signal...")
 }
 
-func (n *Node) executeTests() error {
+func (n *grpcWorker) executeTests(ctx context.Context) error {
 	if n.config == nil {
 		return fmt.Errorf("no test configuration received")
 	}
 
 	fmt.Printf("\nStarting test execution...\n\n")
 
-	// Create evaluator
 	eval := placeholders.NewEvaluator(n.config)
 	defer eval.Close()
 
-	// Create runner
 	r := runner.NewRunner(eval, n.verbose)
-
-	// Progress channel
 	progressChan := make(chan runner.ProgressUpdate, 100)
 
-	// Start progress reporter with WaitGroup for proper synchronization
 	var progressWg sync.WaitGroup
 	progressWg.Add(1)
 	go n.reportProgress(progressChan, &progressWg)
 
-	// Run tests
 	results := make([]*runner.TestResult, len(n.config.Tests))
 
 	if n.parallel {
@@ -197,88 +215,78 @@ func (n *Node) executeTests() error {
 			index := i
 			go func(t config.Test, resultIndex int) {
 				defer wg.Done()
-				results[resultIndex] = r.RunTest(&t, progressChan)
+				results[resultIndex] = r.RunTest(ctx, &t, progressChan)
 			}(test, index)
 		}
 		wg.Wait()
 	} else {
 		for i := range n.config.Tests {
 			test := n.config.Tests[i]
-			results[i] = r.RunTest(&test, progressChan)
+			results[i] = r.RunTest(ctx, &test, progressChan)
 		}
 	}
 
 	close(progressChan)
-	progressWg.Wait() // Wait for progress reporter to finish processing all messages
+	progressWg.Wait()
 
-	// Send results to controller
 	for _, result := range results {
-		resultMsg, err := newProtocolMessage(protocol.MsgTypeTestResult, protocol.TestResultMessage{
-			NodeName: n.nodeName,
-			TestName: result.Test.Name,
-			Result:   result,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to build test result for %s: %w", result.Test.Name, err)
+		if result == nil || result.Test == nil {
+			continue
 		}
-
-		// Retry sending result with exponential backoff
-		// Backoff pattern: 1s (2^0), 2s (2^1), 4s (2^2) using bit shift
-		var lastErr error
-		for attempt := 0; attempt < maxResultSendRetries; attempt++ {
-			if err := n.encoder.Encode(resultMsg); err != nil {
-				lastErr = err
-				if attempt < maxResultSendRetries-1 {
-					waitTime := time.Duration(1<<uint(attempt)) * time.Second
-					fmt.Printf("Failed to send test result (attempt %d/%d): %v. Retrying in %v...\n",
-						attempt+1, maxResultSendRetries, err, waitTime)
-					time.Sleep(waitTime)
-					continue
-				}
-			} else {
-				lastErr = nil
-				break
-			}
+		msg := &payloadpb.NodeMessage{
+			Payload: &payloadpb.NodeMessage_TestResult{
+				TestResult: &payloadpb.TestResultMessage{
+					NodeName: n.nodeName,
+					TestName: result.Test.Name,
+					Result:   protocol.TestResultToProto(result),
+				},
+			},
 		}
-
-		if lastErr != nil {
-			return fmt.Errorf("failed to send test result for %s after %d attempts: %w",
-				result.Test.Name, maxResultSendRetries, lastErr)
+		if err := n.sendWithRetry(msg); err != nil {
+			return fmt.Errorf("send test result for %s: %w", result.Test.Name, err)
 		}
 	}
 
 	fmt.Println("\n✓ All tests completed. Results sent to controller.")
-
 	return nil
 }
 
-func (n *Node) reportProgress(progressChan <-chan runner.ProgressUpdate, wg *sync.WaitGroup) {
+func (n *grpcWorker) sendWithRetry(msg *payloadpb.NodeMessage) error {
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := n.send(msg); err != nil {
+			lastErr = err
+			if attempt < maxRetries-1 {
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+		} else {
+			return nil
+		}
+	}
+	return lastErr
+}
+
+func (n *grpcWorker) reportProgress(progressChan <-chan runner.ProgressUpdate, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for update := range progressChan {
-		// Send to controller
-		progressMsg, err := newProtocolMessage(protocol.MsgTypeProgress, protocol.ProgressMessage{
-			NodeName: n.nodeName,
-			TestName: update.TestName,
-			Elapsed:  update.Elapsed.Seconds(),
-			Total:    update.Total,
-			Failures: update.Failures,
-			RPS:      update.RPS,
-			Done:     update.Done,
-		})
-		if err != nil {
-			if n.verbose {
-				fmt.Printf("Failed to build progress update: %v\n", err)
-			}
-			continue
+		msg := &payloadpb.NodeMessage{
+			Payload: &payloadpb.NodeMessage_Progress{
+				Progress: &payloadpb.ProgressMessage{
+					NodeName:       n.nodeName,
+					TestName:       update.TestName,
+					ElapsedSeconds: update.Elapsed.Seconds(),
+					TotalRequests:  update.Total,
+					Failures:       update.Failures,
+					Rps:            update.RPS,
+					Done:           update.Done,
+				},
+			},
 		}
-
-		if err := n.encoder.Encode(progressMsg); err != nil {
-			if n.verbose {
-				fmt.Printf("Failed to send progress update: %v\n", err)
-			}
+		if err := n.send(msg); err != nil && n.verbose {
+			fmt.Printf("Failed to send progress update: %v\n", err)
 		}
-
-		// Also display locally (optional)
 		if n.verbose {
 			if update.Done {
 				fmt.Printf("✓ %s: COMPLETE - %d requests, %.1f RPS, %d failures\n",

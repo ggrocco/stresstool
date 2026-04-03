@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,7 +31,7 @@ func newTestRunner(t *testing.T, cfg *config.Config) *Runner {
 // It returns the result and the final Done progress update.
 func runTest(r *Runner, test *config.Test) (*TestResult, ProgressUpdate) {
 	progressChan := make(chan ProgressUpdate, 200)
-	result := r.RunTest(test, progressChan)
+	result := r.RunTest(context.Background(), test, progressChan)
 	close(progressChan)
 
 	// Drain and find the Done update
@@ -356,7 +357,7 @@ func TestRunTest_ProgressUpdates(t *testing.T) {
 		}
 	}()
 
-	r.RunTest(test, progressChan)
+	r.RunTest(context.Background(), test, progressChan)
 	close(progressChan)
 	<-done
 

@@ -18,9 +18,11 @@ async function refreshNodes() {
 
 async function startTests() {
   const btn = document.getElementById('start-btn');
+  const stopBtn = document.getElementById('stop-btn');
   const checkBtn = document.getElementById('check-btn');
   const status = document.getElementById('status');
   btn.disabled = true;
+  stopBtn.disabled = false;
   checkBtn.disabled = true;
   status.textContent = 'Sending start signal\u2026';
   try {
@@ -31,12 +33,30 @@ async function startTests() {
     } else {
       status.textContent = 'Error: ' + (data.error || 'unknown');
       btn.disabled = false;
+      stopBtn.disabled = true;
       checkBtn.disabled = false;
     }
   } catch(e) {
     status.textContent = 'Error: ' + e.message;
     btn.disabled = false;
+    stopBtn.disabled = true;
     checkBtn.disabled = false;
+  }
+}
+
+async function stopTests() {
+  const status = document.getElementById('status');
+  status.textContent = 'Sending stop signal\u2026';
+  try {
+    const res = await fetch('/api/stop', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      status.textContent = 'Stop sent to ' + (data.nodes || 0) + ' node(s).';
+    } else {
+      status.textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
   }
 }
 

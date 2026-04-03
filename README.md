@@ -201,41 +201,42 @@ tests:
 
 ## Communication Protocol
 
-The controller and nodes communicate over persistent TCP connections using
-message envelopes with JSON payloads:
+The controller and nodes communicate over **gRPC** using a bidirectional
+`Session` stream (`StressTestService` in `proto/api/v1/payload.proto`). Messages
+are protobuf `oneof` variants on `NodeMessage` (node → controller) and
+`ControllerMessage` (controller → node).
 
-- Envelope fields are now strongly typed (`type` + raw JSON payload) to avoid
-  repeated map/object re-encoding while decoding messages.
-- This lowers CPU overhead compared with decoding `interface{}` payloads and is
-  a cleaner migration point for a future protobuf/gRPC transport.
+### Message flow (high level)
 
-### Message Types
+1. **Hello**: Node opens the stream and sends hello (name + version).
+2. **TestSpec**: After you start a run, the controller sends each node its config slice.
+3. **Ready**: Node validates config and responds with ready (or **Error** if validation fails).
+4. **StartTests**: Controller tells all ready nodes to begin execution.
+5. **Progress** / **TestResult**: Node streams progress and final metrics.
+6. **StopTests** (optional): Controller can request early cancellation (e.g. web **Stop** or API).
+7. **Complete**: Controller closes the logical run; nodes may disconnect.
 
-1. **Hello**: Node announces itself to controller
-2. **TestSpec**: Controller sends test configuration to node
-3. **Ready**: Node confirms it's ready to start
-4. **StartTests**: Controller signals all nodes to begin
-5. **Progress**: Node sends real-time progress updates
-6. **TestResult**: Node sends final test results
-7. **Complete**: Controller signals all tests are done
+By default, traffic is **plaintext gRPC** (`--insecure` defaults to true on
+`controller` and `node`). For TLS or mTLS, set `--insecure=false` and pass
+`--tls-cert`, `--tls-key`, and when needed `--tls-ca` (see `internal/cli/tls.go`).
 
-### About gRPC
+### Protobuf / Buf
 
-gRPC can improve performance for larger distributed runs because protobuf is
-typically smaller and faster to encode/decode than JSON, and HTTP/2 provides
-stream multiplexing and flow control. For small clusters, the performance
-difference is often modest; request execution load is usually the main bottleneck.
+Payload schemas live in `proto/api/v1/payload.proto`. Regenerating Go code from them requires the **[Buf CLI](https://buf.build/docs/installation)**.
 
-### Protobuf/Buf schema source
+**Install Buf (macOS / Homebrew):**
 
-Payload schemas are defined in `proto/api/v1/payload.proto`, with Buf
-module and generation config in `buf.yaml` and `buf.gen.yaml`.
+```bash
+brew install bufbuild/buf/buf
+```
 
-Generate Go payload types/stubs with:
+Module and codegen config: `buf.yaml`, `buf.gen.yaml`. From the repository root:
 
 ```bash
 buf generate
 ```
+
+This runs the remote `protocolbuffers/go` and `grpc/go` plugins configured in `buf.gen.yaml` and writes generated files under `internal/protocol/payloadpb/`.
 
 ## Benefits of Distributed Mode
 
@@ -300,6 +301,8 @@ Test: api_login_test
 ```
 
 ## Build from Source
+
+**Toolchain:** [Go](https://go.dev/dl/) 1.26.1+ (see `go.mod`). To regenerate protobuf/gRPC Go stubs after editing `proto/`, install Buf (e.g. `brew install bufbuild/buf/buf`) and run `buf generate`.
 
 ```bash
 git clone <repository-url>

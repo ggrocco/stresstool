@@ -4,21 +4,31 @@ package stresstool.v1;
 
 option go_package = "stresstool/internal/protocol/payloadpb;payloadpb";
 
-message Envelope {
-  MessageType type = 1;
-  bytes payload = 2;
+service StressTestService {
+  rpc Session(stream NodeMessage) returns (stream ControllerMessage);
 }
 
-enum MessageType {
-  MESSAGE_TYPE_UNSPECIFIED = 0;
-  MESSAGE_TYPE_HELLO = 1;
-  MESSAGE_TYPE_TEST_SPEC = 2;
-  MESSAGE_TYPE_PROGRESS = 3;
-  MESSAGE_TYPE_TEST_RESULT = 4;
-  MESSAGE_TYPE_START_TESTS = 5;
-  MESSAGE_TYPE_READY = 6;
-  MESSAGE_TYPE_COMPLETE = 7;
-  MESSAGE_TYPE_ERROR = 8;
+message NodeMessage {
+  oneof payload {
+    HelloMessage hello = 1;
+    ReadyMessage ready = 2;
+    ProgressMessage progress = 3;
+    TestResultMessage test_result = 4;
+    ErrorMessage error = 5;
+  }
+}
+
+message ControllerMessage {
+  oneof payload {
+    TestSpecMessage test_spec = 1;
+    StartTestsMessage start_tests = 2;
+    CompleteMessage complete = 3;
+    StopTestsMessage stop_tests = 4;
+  }
+}
+
+message StopTestsMessage {
+  string reason = 1;
 }
 
 message Config {
@@ -90,6 +100,7 @@ message TestResult {
   Assertions assertions = 3;
   bool passed = 4;
   repeated string errors = 5;
+  bool stopped_early = 6;
 }
 
 message Assertions {}

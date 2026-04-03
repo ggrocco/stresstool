@@ -60,8 +60,34 @@ func (m *Metrics) aggregate() {
 
 // Stop closes the metrics channel and waits for the aggregator to drain all events
 func (m *Metrics) Stop() {
+	if m.metricsChan == nil {
+		return
+	}
 	close(m.metricsChan)
 	<-m.aggregateDone
+}
+
+// NewMetricsSnapshot returns read-only metrics (e.g. after deserialization). Do not call AddRequest or Stop.
+func NewMetricsSnapshot(totalReq, success, failure, assertFail int64, latencies []time.Duration, statusCodes map[int]int64, errors map[string]int64) *Metrics {
+	sc := make(map[int]int64, len(statusCodes))
+	for k, v := range statusCodes {
+		sc[k] = v
+	}
+	errC := make(map[string]int64, len(errors))
+	for k, v := range errors {
+		errC[k] = v
+	}
+	lat := make([]time.Duration, len(latencies))
+	copy(lat, latencies)
+	return &Metrics{
+		TotalRequests:     totalReq,
+		SuccessCount:      success,
+		FailureCount:      failure,
+		AssertionFailures: assertFail,
+		Latencies:         lat,
+		StatusCodes:       sc,
+		Errors:            errC,
+	}
 }
 
 // AddRequest records a request result

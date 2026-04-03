@@ -1,0 +1,9 @@
+.git
+.github
+dist
+terraform
+docs
+*.md
+.DS_Store
+stresstool
+*.exe

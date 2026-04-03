@@ -16,6 +16,7 @@ import (
 
 	"stresstool/internal/config"
 	"stresstool/internal/protocol"
+	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
 	"stresstool/internal/runner"
 )
 
@@ -32,6 +33,9 @@ const (
 	evTestResult
 	evNodeError
 	evSetExpected
+	evNodeReady
+	evBeginAwaitReady
+	evClearAwaitReady
 )
 
 // controllerEvent carries a state mutation to the state manager goroutine
@@ -43,6 +47,8 @@ type controllerEvent struct {
 	result          *protocol.TestResultMessage
 	nodeErr         *protocol.ErrorMessage
 	expectedResults map[string]map[string]bool
+	awaitNodes      []string
+	awaitReply      chan struct{}
 }
 
 // queryKind identifies the type of a synchronous state query
@@ -74,6 +80,7 @@ type Controller struct {
 	config     *config.Config
 	parallel   bool
 	verbose    bool
+	tlsOpts    TLSOptions
 
 	// eventChan serialises all state mutations through the state manager
 	eventChan chan controllerEvent
@@ -90,12 +97,11 @@ type Controller struct {
 	logQueryChan chan logQuery
 }
 
-// NodeConnection represents a connected node
+// NodeConnection represents a connected node (gRPC session).
 type NodeConnection struct {
-	Name    string
-	Conn    net.Conn
-	Encoder *json.Encoder
-	Decoder *json.Decoder
+	Name     string
+	PeerAddr string
+	SendCh   chan<- *payloadpb.ControllerMessage
 }
 
 type logQuery struct {
@@ -136,8 +142,8 @@ func (c *Controller) runLogManager() {
 	}
 }
 
-// RunController starts the controller and waits for nodes to connect
-func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool) error {
+// RunController starts the controller and waits for nodes to connect.
+func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool, tlsOpts TLSOptions) error {
 	// Load configuration
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
@@ -155,6 +161,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		config:         cfg,
 		parallel:       parallel,
 		verbose:        verbose,
+		tlsOpts:        tlsOpts,
 		eventChan:      make(chan controllerEvent, 100),
 		queryChan:      make(chan stateQuery),
 		completionChan: make(chan struct{}),
@@ -178,6 +185,20 @@ func (c *Controller) runStateManager() {
 	var expectedResults map[string]map[string]bool
 	completionSignaled := false
 
+	var awaitingReady map[string]struct{}
+	var awaitReadyReply chan struct{}
+
+	signalAwaitIfEmpty := func() {
+		if awaitReadyReply != nil && len(awaitingReady) == 0 {
+			select {
+			case awaitReadyReply <- struct{}{}:
+			default:
+			}
+			awaitReadyReply = nil
+			awaitingReady = nil
+		}
+	}
+
 	checkCompletion := func() {
 		if completionSignaled || expectedResults == nil {
 			return
@@ -197,9 +218,14 @@ func (c *Controller) runStateManager() {
 			switch event.kind {
 			case evNodeConnected:
 				nodes[event.nodeName] = event.conn
+				c.log("✓ Node connected: %s", event.nodeName)
 
 			case evNodeDisconnected:
 				delete(nodes, event.nodeName)
+				if awaitingReady != nil {
+					delete(awaitingReady, event.nodeName)
+					signalAwaitIfEmpty()
+				}
 				c.log("✗ Node disconnected: %s", event.nodeName)
 
 			case evProgress:
@@ -251,6 +277,10 @@ func (c *Controller) runStateManager() {
 
 			case evNodeError:
 				nodeErrors[event.nodeErr.NodeName] = event.nodeErr
+				if awaitingReady != nil {
+					delete(awaitingReady, event.nodeErr.NodeName)
+					signalAwaitIfEmpty()
+				}
 				c.log("✗ Error from node %s during %s: %s",
 					event.nodeErr.NodeName, event.nodeErr.Phase, event.nodeErr.Error)
 				checkCompletion()
@@ -258,6 +288,27 @@ func (c *Controller) runStateManager() {
 			case evSetExpected:
 				expectedResults = event.expectedResults
 				checkCompletion()
+
+			case evNodeReady:
+				if awaitingReady != nil {
+					delete(awaitingReady, event.nodeName)
+					signalAwaitIfEmpty()
+				}
+				if c.verbose {
+					fmt.Printf("Node %s is ready\n", event.nodeName)
+				}
+
+			case evBeginAwaitReady:
+				awaitingReady = make(map[string]struct{}, len(event.awaitNodes))
+				for _, name := range event.awaitNodes {
+					awaitingReady[name] = struct{}{}
+				}
+				awaitReadyReply = event.awaitReply
+				signalAwaitIfEmpty()
+
+			case evClearAwaitReady:
+				awaitingReady = nil
+				awaitReadyReply = nil
 			}
 
 		case query := <-c.queryChan:
@@ -323,17 +374,10 @@ func (c *Controller) queryFinalState() (map[string]map[string]*runner.TestResult
 }
 
 func (c *Controller) start() error {
-	ln, err := net.Listen("tcp", c.listenAddr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", c.listenAddr, err)
-	}
-	defer ln.Close()
-
-	// Start the state manager goroutine
 	go c.runStateManager()
 	go c.runLogManager()
 
-	fmt.Printf("Controller listening on %s\n", c.listenAddr)
+	fmt.Printf("Controller listening on %s (gRPC)\n", c.listenAddr)
 	fmt.Printf("Loaded config with %d test(s)\n", len(c.config.Tests))
 	fmt.Println("\nWaiting for nodes to connect...")
 
@@ -345,19 +389,10 @@ func (c *Controller) start() error {
 		fmt.Println("Press Ctrl+C to cancel, or wait for nodes and then type 'start' to begin tests")
 	}
 
-	// Start accepting connections in background
-	connChan := make(chan net.Conn)
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			connChan <- conn
-		}
-	}()
+	return listenAndServeGRPC(c, c.tlsOpts)
+}
 
-	// Handle user input and connections
+func (c *Controller) runControllerLoop() error {
 	inputChan := make(chan string)
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
@@ -370,8 +405,6 @@ func (c *Controller) start() error {
 
 	for {
 		select {
-		case conn := <-connChan:
-			go c.handleNodeConnection(conn)
 		case input := <-inputChan:
 			switch input {
 			case "start":
@@ -384,97 +417,6 @@ func (c *Controller) start() error {
 		case <-c.triggerChan:
 			c.log("Start triggered via UI...")
 			return c.startTests()
-		}
-	}
-}
-
-func (c *Controller) handleNodeConnection(conn net.Conn) {
-	decoder := json.NewDecoder(conn)
-	encoder := json.NewEncoder(conn)
-
-	// Read hello message
-	var msg protocol.Message
-	if err := decoder.Decode(&msg); err != nil {
-		fmt.Printf("Failed to decode hello message: %v\n", err)
-		conn.Close()
-		return
-	}
-
-	if msg.Type != protocol.MsgTypeHello {
-		fmt.Printf("Expected hello message, got: %s\n", msg.Type)
-		conn.Close()
-		return
-	}
-
-	// Parse hello data
-	helloData, err := decodeProtocolMessageData[protocol.HelloMessage](msg)
-	if err != nil {
-		fmt.Printf("Failed to parse hello message: %v\n", err)
-		conn.Close()
-		return
-	}
-
-	nodeName := helloData.NodeName
-	c.log("✓ Node connected: %s", nodeName)
-
-	// Register node with state manager
-	c.eventChan <- controllerEvent{
-		kind:     evNodeConnected,
-		nodeName: nodeName,
-		conn: &NodeConnection{
-			Name:    nodeName,
-			Conn:    conn,
-			Encoder: encoder,
-			Decoder: decoder,
-		},
-	}
-
-	// Listen for messages from this node
-	c.handleNodeMessages(nodeName, decoder)
-
-	// Notify state manager of disconnection
-	c.eventChan <- controllerEvent{kind: evNodeDisconnected, nodeName: nodeName}
-}
-
-func (c *Controller) handleNodeMessages(nodeName string, decoder *json.Decoder) {
-	for decoder.More() {
-		var msg protocol.Message
-		if err := decoder.Decode(&msg); err != nil {
-			if c.verbose {
-				fmt.Printf("Error decoding message from %s: %v\n", nodeName, err)
-			}
-			return
-		}
-
-		switch msg.Type {
-		case protocol.MsgTypeProgress:
-			progressData, err := decodeProtocolMessageData[protocol.ProgressMessage](msg)
-			if err != nil {
-				fmt.Printf("Failed to parse progress message: %v\n", err)
-				continue
-			}
-			c.eventChan <- controllerEvent{kind: evProgress, progress: progressData}
-
-		case protocol.MsgTypeTestResult:
-			resultData, err := decodeProtocolMessageData[protocol.TestResultMessage](msg)
-			if err != nil {
-				fmt.Printf("Failed to parse test result message: %v\n", err)
-				continue
-			}
-			c.eventChan <- controllerEvent{kind: evTestResult, result: resultData}
-
-		case protocol.MsgTypeReady:
-			if c.verbose {
-				fmt.Printf("Node %s is ready\n", nodeName)
-			}
-
-		case protocol.MsgTypeError:
-			errorData, err := decodeProtocolMessageData[protocol.ErrorMessage](msg)
-			if err != nil {
-				fmt.Printf("Failed to parse error message: %v\n", err)
-				continue
-			}
-			c.eventChan <- controllerEvent{kind: evNodeError, nodeErr: errorData}
 		}
 	}
 }
@@ -507,36 +449,54 @@ func (c *Controller) startTests() error {
 	}
 	c.eventChan <- controllerEvent{kind: evSetExpected, expectedResults: expected}
 
-	// Send test spec to each node using the snapshot (no lock needed)
+	awaitReply := make(chan struct{}, 1)
+	nodeNames := make([]string, 0, len(nodes))
+	for name := range nodes {
+		nodeNames = append(nodeNames, name)
+	}
+	c.eventChan <- controllerEvent{
+		kind:       evBeginAwaitReady,
+		awaitNodes: nodeNames,
+		awaitReply: awaitReply,
+	}
+
+	pbCfg := protocol.ConfigToProto(c.config)
 	for nodeName, node := range nodes {
-		spec := protocol.TestSpecMessage{
-			Config:   c.config,
-			NodeName: nodeName,
-			Parallel: c.parallel,
+		msg := &payloadpb.ControllerMessage{
+			Payload: &payloadpb.ControllerMessage_TestSpec{
+				TestSpec: &payloadpb.TestSpecMessage{
+					Config:   pbCfg,
+					NodeName: nodeName,
+					Parallel: c.parallel,
+				},
+			},
 		}
-		msg, err := newProtocolMessage(protocol.MsgTypeTestSpec, spec)
-		if err != nil {
-			fmt.Printf("Failed to build test spec for %s: %v\n", nodeName, err)
-			continue
-		}
-		if err := node.Encoder.Encode(msg); err != nil {
-			fmt.Printf("Failed to send test spec to %s: %v\n", nodeName, err)
+		select {
+		case node.SendCh <- msg:
+		default:
+			fmt.Printf("Failed to enqueue test spec for %s (send buffer full)\n", nodeName)
 		}
 	}
 
-	// Wait a bit for nodes to prepare
-	time.Sleep(500 * time.Millisecond)
-
-	// Send start signal to each node
-	startMsg, err := newProtocolMessage(protocol.MsgTypeStartTests, protocol.StartTestsMessage{
-		Timestamp: time.Now().Unix(),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to build start signal: %w", err)
+	timer := time.NewTimer(2 * time.Minute)
+	select {
+	case <-awaitReply:
+	case <-timer.C:
+		c.log("Timeout waiting for nodes to report ready; sending start anyway")
+		c.eventChan <- controllerEvent{kind: evClearAwaitReady}
 	}
+	timer.Stop()
+
 	for nodeName, node := range nodes {
-		if err := node.Encoder.Encode(startMsg); err != nil {
-			fmt.Printf("Failed to send start signal to %s: %v\n", nodeName, err)
+		startMsg := &payloadpb.ControllerMessage{
+			Payload: &payloadpb.ControllerMessage_StartTests{
+				StartTests: &payloadpb.StartTestsMessage{Timestamp: time.Now().Unix()},
+			},
+		}
+		select {
+		case node.SendCh <- startMsg:
+		default:
+			fmt.Printf("Failed to enqueue start signal for %s\n", nodeName)
 		}
 	}
 
@@ -546,14 +506,14 @@ func (c *Controller) startTests() error {
 	// Print final summary (also moves terminal cursor down past progress lines)
 	c.printFinalSummary()
 
-	// Notify all nodes that the run is complete so they can disconnect
-	completeMsg, err := newProtocolMessage(protocol.MsgTypeComplete, nil)
-	if err != nil {
-		return fmt.Errorf("failed to build completion signal: %w", err)
-	}
 	for nodeName, node := range nodes {
-		if err := node.Encoder.Encode(completeMsg); err != nil {
-			fmt.Printf("Failed to send complete signal to %s: %v\n", nodeName, err)
+		completeMsg := &payloadpb.ControllerMessage{
+			Payload: &payloadpb.ControllerMessage_Complete{Complete: &payloadpb.CompleteMessage{}},
+		}
+		select {
+		case node.SendCh <- completeMsg:
+		default:
+			fmt.Printf("Failed to enqueue complete signal for %s\n", nodeName)
 		}
 	}
 
@@ -630,6 +590,7 @@ func (c *Controller) startUIServer() {
 	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
 	mux.HandleFunc("/api/nodes", c.handleAPINodes)
 	mux.HandleFunc("/api/start", c.handleAPIStart)
+	mux.HandleFunc("/api/stop", c.handleAPIStop)
 	mux.HandleFunc("/api/config", c.handleAPIConfig)
 	mux.HandleFunc("/api/logs", c.handleAPILogs)
 
@@ -651,8 +612,11 @@ func (c *Controller) handleAPINodes(w http.ResponseWriter, r *http.Request) {
 	infos := make([]nodeInfo, 0, len(nodes))
 	for name, nc := range nodes {
 		addr := ""
-		if nc.Conn != nil {
-			host, _, _ := net.SplitHostPort(nc.Conn.RemoteAddr().String())
+		if nc.PeerAddr != "" {
+			host, _, _ := net.SplitHostPort(nc.PeerAddr)
+			if host == "" {
+				host = nc.PeerAddr
+			}
 			ip := net.ParseIP(host)
 			if ip != nil && ip.IsLoopback() {
 				addr = "local"
@@ -665,6 +629,27 @@ func (c *Controller) handleAPINodes(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"nodes": infos})
+}
+
+func (c *Controller) handleAPIStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	nodes := c.queryNodes()
+	for _, nc := range nodes {
+		stopMsg := &payloadpb.ControllerMessage{
+			Payload: &payloadpb.ControllerMessage_StopTests{
+				StopTests: &payloadpb.StopTestsMessage{Reason: "user_stop"},
+			},
+		}
+		select {
+		case nc.SendCh <- stopMsg:
+		default:
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "nodes": len(nodes)})
 }
 
 func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
@@ -740,6 +725,9 @@ func printTestResult(result *runner.TestResult) {
 	fmt.Printf("    P99: %s\n", p99.Round(time.Millisecond))
 
 	// Overall result
+	if result.StoppedEarly {
+		fmt.Printf("  Note: run stopped early (partial result)\n")
+	}
 	if result.Passed {
 		fmt.Printf("  Result: ✓ PASSED\n")
 	} else {

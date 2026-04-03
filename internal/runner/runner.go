@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,8 @@ type TestResult struct {
 	Assertions *Assertions
 	Passed     bool
 	Errors     []string
+	// StoppedEarly is true when the parent context was cancelled before the scheduled run duration ended.
+	StoppedEarly bool
 }
 
 // Runner executes stress tests
@@ -50,8 +53,12 @@ func NewRunner(evaluator *placeholders.Evaluator, verbose bool) *Runner {
 	}
 }
 
-// RunTest executes a single test
-func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) *TestResult {
+// RunTest executes a single test. The parent ctx is used for cancellation (e.g. distributed stop signal);
+// the run still ends at the configured deadline unless ctx is cancelled first.
+func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan chan<- ProgressUpdate) *TestResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	expectedTotal := test.RequestsPerSecond * test.RunSeconds
 	metrics := NewMetrics(expectedTotal)
 	assertions := NewAssertions(r.evaluator)
@@ -65,7 +72,7 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 
 	startTime := time.Now()
 	endTime := startTime.Add(time.Duration(test.RunSeconds) * time.Second)
-	runCtx, cancelRun := context.WithDeadline(context.Background(), endTime)
+	runCtx, cancelRun := context.WithDeadline(ctx, endTime)
 	defer cancelRun()
 
 	limiter := rate.NewLimiter(rate.Limit(float64(test.RequestsPerSecond)), 1)
@@ -116,8 +123,12 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 
 	<-runCtx.Done()
 	wg.Wait()
-	progressWg.Wait()                                                           // ensure progress reporter has exited
-	metrics.Stop() // drain and close the metrics channel before reading results
+	progressWg.Wait() // ensure progress reporter has exited
+	metrics.Stop()    // drain and close the metrics channel before reading results
+
+	if errors.Is(ctx.Err(), context.Canceled) {
+		result.StoppedEarly = true
+	}
 
 	// Final progress update
 	elapsed := time.Since(startTime)
@@ -134,6 +145,9 @@ func (r *Runner) RunTest(test *config.Test, progressChan chan<- ProgressUpdate) 
 
 	// Check if test passed
 	if metrics.AssertionFailures > 0 || metrics.FailureCount > 0 {
+		result.Passed = false
+	}
+	if result.StoppedEarly {
 		result.Passed = false
 	}
 

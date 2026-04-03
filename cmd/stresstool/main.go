@@ -20,6 +20,10 @@ var (
 	listenAddr     string
 	webUI          bool
 	webPort        int
+	tlsCert        string
+	tlsKey         string
+	tlsCA          string
+	tlsInsecure    bool
 )
 
 var rootCmd = &cobra.Command{
@@ -67,7 +71,7 @@ var nodeCmd = &cobra.Command{
 			return fmt.Errorf("controller address is required (use --controller)")
 		}
 
-		if err := cli.RunNode(nodeName, controllerAddr, verbose); err != nil {
+		if err := cli.RunNode(nodeName, controllerAddr, verbose, tlsOptsFromFlags()); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -89,7 +93,7 @@ var controllerCmd = &cobra.Command{
 		if webUI {
 			uiAddr = fmt.Sprintf(":%d", webPort)
 		}
-		if err := cli.RunController(listenAddr, configFile, uiAddr, parallel, verbose); err != nil {
+		if err := cli.RunController(listenAddr, configFile, uiAddr, parallel, verbose, tlsOptsFromFlags()); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -126,6 +130,26 @@ func init() {
 	rootCmd.AddCommand(controllerCmd)
 
 	rootCmd.AddCommand(versionCmd)
+
+	// gRPC TLS: use --insecure for plaintext (default). Omit --insecure and pass cert flags to enable TLS.
+	nodeCmd.Flags().BoolVar(&tlsInsecure, "insecure", true, "Use plaintext gRPC (set false when using TLS)")
+	nodeCmd.Flags().StringVar(&tlsCert, "tls-cert", "", "Path to TLS client certificate (mTLS)")
+	nodeCmd.Flags().StringVar(&tlsKey, "tls-key", "", "Path to TLS client private key (mTLS)")
+	nodeCmd.Flags().StringVar(&tlsCA, "tls-ca", "", "Path to CA certificate to verify the controller")
+
+	controllerCmd.Flags().BoolVar(&tlsInsecure, "insecure", true, "Use plaintext gRPC (set false when using TLS)")
+	controllerCmd.Flags().StringVar(&tlsCert, "tls-cert", "", "Path to TLS server certificate")
+	controllerCmd.Flags().StringVar(&tlsKey, "tls-key", "", "Path to TLS server private key")
+	controllerCmd.Flags().StringVar(&tlsCA, "tls-ca", "", "Path to CA for verifying client certificates (mTLS)")
+}
+
+func tlsOptsFromFlags() cli.TLSOptions {
+	return cli.TLSOptions{
+		CertFile: tlsCert,
+		KeyFile:  tlsKey,
+		CAFile:   tlsCA,
+		Insecure: tlsInsecure,
+	}
 }
 
 func main() {

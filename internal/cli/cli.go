@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -59,7 +60,7 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 			index := i
 			go func(t config.Test, resultIndex int) {
 				defer wg.Done()
-				results[resultIndex] = r.RunTest(&t, progressChan)
+				results[resultIndex] = r.RunTest(context.Background(), &t, progressChan)
 			}(test, index)
 		}
 
@@ -67,7 +68,7 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 	} else {
 		for i := range cfg.Tests {
 			test := cfg.Tests[i]
-			results[i] = r.RunTest(&test, progressChan)
+			results[i] = r.RunTest(context.Background(), &test, progressChan)
 		}
 	}
 

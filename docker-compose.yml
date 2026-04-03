@@ -1,0 +1,83 @@
+# Distributed stresstool: controller + two nodes over gRPC (plaintext).
+#
+# Default (manual start): open http://localhost:8091 and click Start.
+#   docker compose up --build
+#
+# Auto-start via web API (optional profile):
+#   docker compose --profile auto-start up --build
+#
+# Controller: gRPC :8090, web UI :8091. With profile `auto-start`, the starter
+# service waits 15s then POSTs /api/start. When the run finishes, the controller exits.
+#
+services:
+  controller:
+    build: .
+    image: stresstool:local
+    command:
+      - controller
+      - -f
+      - /config/config.yaml
+      - --listen
+      - :8090
+      - --web
+      - --web-port
+      - "8091"
+      - --insecure
+    volumes:
+      - ./docker/compose-config.yaml:/config/config.yaml:ro
+    ports:
+      - "8090:8090"
+      - "8091:8091"
+    restart: "no"
+
+  node-a:
+    build: .
+    image: stresstool:local
+    depends_on:
+      - controller
+    command:
+      - node
+      - --node-name
+      - node-a
+      - --controller
+      - controller:8090
+      - --insecure
+    restart: "no"
+
+  node-b:
+    build: .
+    image: stresstool:local
+    depends_on:
+      - controller
+    command:
+      - node
+      - --node-name
+      - node-b
+      - --controller
+      - controller:8090
+      - --insecure
+    restart: "no"
+
+  starter:
+    profiles:
+      - auto-start
+    image: curlimages/curl:8.6.0
+    depends_on:
+      - controller
+      - node-a
+      - node-b
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "Waiting for controller web UI and nodes..."
+        sleep 15
+        echo "POST /api/start"
+        curl -sfS -X POST "http://controller:8091/api/start"
+        echo ""
+        echo "Start signal sent. Watch controller logs for progress."
+
+networks:
+  default:
+    name: stresstool-compose

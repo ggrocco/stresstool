@@ -1,0 +1,39 @@
+# Config for docker-compose: node names must match --node-name on each worker.
+funcs:
+  - name: token
+    cmd: ["echo", "Bearer", "docker-compose-test"]
+
+tests:
+  - name: httpbin_post_smoke
+    path: "https://httpbin.org/post"
+    method: "POST"
+    requests_per_second: 3
+    threads: 2
+    run_seconds: 8
+    headers:
+      Authorization: "{{ token() }}"
+      Content-Type: "application/json"
+    body: '{"source":"stresstool-docker"}'
+    assert:
+      status_code: 200
+      body_contains: "json"
+      max_latency_ms: 5000
+    nodes:
+      node-a:
+        requests_per_second: 2
+        threads: 1
+      node-b:
+        requests_per_second: 4
+        threads: 2
+
+  - name: httpbin_get_smoke
+    path: "https://httpbin.org/get"
+    method: "GET"
+    requests_per_second: 5
+    threads: 2
+    run_seconds: 5
+    headers:
+      X-Request-Id: "{{ uuid() }}"
+    assert:
+      status_code: 200
+      max_latency_ms: 3000
