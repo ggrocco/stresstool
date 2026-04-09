@@ -1,6 +1,14 @@
 funcs:
-  - name: token
-    cmd: ["echo", "Bearer", "test-token-12345"]
+  - name: get_password
+    cmd: ["echo", "test-password-12345"]
+
+# Auth configuration: only one type allowed per config file.
+# All tests use it automatically unless a test sets "auth: false".
+# Supported types: basic_auth, bearer, api_key, oauth2_client_credentials
+auth:
+  basic_auth:
+    username: "testuser"
+    password: "{{ get_password() }}"
 
 tests:
   - name: api_login_test
@@ -10,8 +18,8 @@ tests:
     threads: 2
     run_seconds: 10
 
+    # Auth headers (Authorization: Basic ...) are added automatically.
     headers:
-      Authorization: "{{ token() }}"
       X-Request-Id: "{{ uuid() }}"
       X-Timestamp: "{{ now() }}"
       Content-Type: "application/json"
@@ -35,9 +43,10 @@ tests:
       node-b:
         requests_per_second: 8
 
-  - name: api_get_test
+  - name: api_get_public
     path: "https://httpbin.org/get"
     method: "GET"
+    auth: false  # Disable auth for this test
     requests_per_second: 10
     threads: 3
     run_seconds: 5

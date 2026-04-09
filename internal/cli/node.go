@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"stresstool/internal/auth"
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
 	"stresstool/internal/protocol"
@@ -204,7 +205,13 @@ func (n *grpcWorker) executeTests(ctx context.Context) error {
 	eval := placeholders.NewEvaluator(n.config)
 	defer eval.Close()
 
-	r := runner.NewRunner(eval, n.verbose)
+	var authResolver *auth.Resolver
+	if n.config.Auth != nil {
+		authResolver = auth.NewResolver(n.config.Auth)
+		defer authResolver.Close()
+	}
+
+	r := runner.NewRunner(eval, n.verbose, authResolver)
 	progressChan := make(chan runner.ProgressUpdate, 100)
 
 	var progressWg sync.WaitGroup

@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"stresstool/internal/auth"
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
 )
@@ -30,13 +31,14 @@ type TestResult struct {
 
 // Runner executes stress tests
 type Runner struct {
-	evaluator *placeholders.Evaluator
-	client    *http.Client
-	verbose   bool
+	evaluator    *placeholders.Evaluator
+	client       *http.Client
+	verbose      bool
+	authResolver *auth.Resolver
 }
 
 // NewRunner creates a new test runner
-func NewRunner(evaluator *placeholders.Evaluator, verbose bool) *Runner {
+func NewRunner(evaluator *placeholders.Evaluator, verbose bool, authResolver *auth.Resolver) *Runner {
 	transport := &http.Transport{
 		MaxIdleConns:        200,
 		MaxIdleConnsPerHost: 200,
@@ -49,7 +51,8 @@ func NewRunner(evaluator *placeholders.Evaluator, verbose bool) *Runner {
 			Timeout:   30 * time.Second,
 			Transport: transport,
 		},
-		verbose: verbose,
+		verbose:      verbose,
+		authResolver: authResolver,
 	}
 }
 
@@ -199,6 +202,22 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 			return
 		}
 		req.Header.Set(key, evaluatedValue)
+	}
+
+	// Resolve and set auth headers (unless test opts out)
+	if r.authResolver != nil && (test.Auth == nil || *test.Auth) {
+		authHeaders, err := r.authResolver.ResolveHeaders(r.evaluator)
+		if err != nil {
+			errMsg := fmt.Sprintf("auth resolution failed: %v", err)
+			if r.verbose {
+				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+			}
+			metrics.AddRequestWithError(0, 0, false, errMsg)
+			return
+		}
+		for k, v := range authHeaders {
+			req.Header.Set(k, v)
+		}
 	}
 
 	// Execute request

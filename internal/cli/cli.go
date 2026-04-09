@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"stresstool/internal/auth"
 	"stresstool/internal/config"
 	"stresstool/internal/placeholders"
 	"stresstool/internal/runner"
@@ -35,8 +36,15 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 	eval := placeholders.NewEvaluator(cfg)
 	defer eval.Close()
 
+	// Create auth resolver
+	var authResolver *auth.Resolver
+	if cfg.Auth != nil {
+		authResolver = auth.NewResolver(cfg.Auth)
+		defer authResolver.Close()
+	}
+
 	// Create runner
-	r := runner.NewRunner(eval, verbose)
+	r := runner.NewRunner(eval, verbose, authResolver)
 
 	// Run tests
 	results := make([]*runner.TestResult, len(cfg.Tests))
@@ -92,6 +100,26 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 func dryRunValidation(cfg *config.Config) error {
 	fmt.Println("=== DRY RUN MODE ===")
 	fmt.Println()
+
+	// Display auth config
+	if cfg.Auth != nil {
+		authType := cfg.Auth.AuthType()
+		if authType != "" {
+			fmt.Printf("Auth: %s\n", authType)
+			switch {
+			case cfg.Auth.BasicAuth != nil:
+				fmt.Printf("  Username: %s\n", cfg.Auth.BasicAuth.Username)
+			case cfg.Auth.Bearer != nil:
+				fmt.Printf("  Token: %s\n", cfg.Auth.Bearer.Token)
+			case cfg.Auth.APIKey != nil:
+				fmt.Printf("  Header: %s\n", cfg.Auth.APIKey.Header)
+			case cfg.Auth.OAuth2ClientCredentials != nil:
+				fmt.Printf("  Token URL: %s\n", cfg.Auth.OAuth2ClientCredentials.TokenURL)
+				fmt.Printf("  Client ID: %s\n", cfg.Auth.OAuth2ClientCredentials.ClientID)
+			}
+			fmt.Println()
+		}
+	}
 
 	// Validate funcs
 	fmt.Printf("Functions defined: %d\n", len(cfg.Funcs))

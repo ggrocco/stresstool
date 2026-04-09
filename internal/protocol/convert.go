@@ -17,6 +17,7 @@ func ConfigToProto(c *config.Config) *payloadpb.Config {
 	out := &payloadpb.Config{
 		Funcs: make([]*payloadpb.FuncDef, 0, len(c.Funcs)),
 		Tests: make([]*payloadpb.Test, 0, len(c.Tests)),
+		Auth:  authConfigToProto(c.Auth),
 	}
 	for _, f := range c.Funcs {
 		out.Funcs = append(out.Funcs, &payloadpb.FuncDef{
@@ -57,6 +58,9 @@ func testToProto(t *config.Test) *payloadpb.Test {
 			MaxLatencyMs:  int32(t.Assert.MaxLatencyMs),
 		}
 	}
+	if t.Auth != nil && !*t.Auth {
+		pb.AuthDisabled = true
+	}
 	for name, n := range t.Nodes {
 		pb.Nodes[name] = &payloadpb.NodeOverride{
 			RequestsPerSecond: int32(n.RequestsPerSecond),
@@ -73,6 +77,7 @@ func ConfigFromProto(pb *payloadpb.Config) (*config.Config, error) {
 	}
 	out := &config.Config{
 		Funcs: make([]config.FuncDef, 0, len(pb.Funcs)),
+		Auth:  authConfigFromProto(pb.Auth),
 		Tests: make([]config.Test, 0, len(pb.Tests)),
 	}
 	for _, f := range pb.Funcs {
@@ -124,6 +129,10 @@ func testFromProto(t *payloadpb.Test) (*config.Test, error) {
 			MaxLatencyMs:  int(t.Assert.MaxLatencyMs),
 		}
 	}
+	if t.AuthDisabled {
+		f := false
+		out.Auth = &f
+	}
 	for name, n := range t.Nodes {
 		if n == nil {
 			continue
@@ -134,6 +143,72 @@ func testFromProto(t *payloadpb.Test) (*config.Test, error) {
 		}
 	}
 	return out, nil
+}
+
+func authConfigToProto(a *config.AuthConfig) *payloadpb.AuthConfig {
+	if a == nil {
+		return nil
+	}
+	pb := &payloadpb.AuthConfig{}
+	if a.BasicAuth != nil {
+		pb.BasicAuth = &payloadpb.BasicAuthConfig{
+			Username: a.BasicAuth.Username,
+			Password: a.BasicAuth.Password,
+		}
+	}
+	if a.Bearer != nil {
+		pb.Bearer = &payloadpb.BearerAuthConfig{
+			Token: a.Bearer.Token,
+		}
+	}
+	if a.APIKey != nil {
+		pb.ApiKey = &payloadpb.APIKeyAuthConfig{
+			Header: a.APIKey.Header,
+			Key:    a.APIKey.Key,
+		}
+	}
+	if a.OAuth2ClientCredentials != nil {
+		pb.Oauth2ClientCredentials = &payloadpb.OAuth2ClientCredentialsConfig{
+			TokenUrl:     a.OAuth2ClientCredentials.TokenURL,
+			ClientId:     a.OAuth2ClientCredentials.ClientID,
+			ClientSecret: a.OAuth2ClientCredentials.ClientSecret,
+			Scopes:       append([]string(nil), a.OAuth2ClientCredentials.Scopes...),
+		}
+	}
+	return pb
+}
+
+func authConfigFromProto(pb *payloadpb.AuthConfig) *config.AuthConfig {
+	if pb == nil {
+		return nil
+	}
+	a := &config.AuthConfig{}
+	if pb.BasicAuth != nil {
+		a.BasicAuth = &config.BasicAuthConfig{
+			Username: pb.BasicAuth.Username,
+			Password: pb.BasicAuth.Password,
+		}
+	}
+	if pb.Bearer != nil {
+		a.Bearer = &config.BearerAuthConfig{
+			Token: pb.Bearer.Token,
+		}
+	}
+	if pb.ApiKey != nil {
+		a.APIKey = &config.APIKeyAuthConfig{
+			Header: pb.ApiKey.Header,
+			Key:    pb.ApiKey.Key,
+		}
+	}
+	if pb.Oauth2ClientCredentials != nil {
+		a.OAuth2ClientCredentials = &config.OAuth2ClientCredentialsConfig{
+			TokenURL:     pb.Oauth2ClientCredentials.TokenUrl,
+			ClientID:     pb.Oauth2ClientCredentials.ClientId,
+			ClientSecret: pb.Oauth2ClientCredentials.ClientSecret,
+			Scopes:       append([]string(nil), pb.Oauth2ClientCredentials.Scopes...),
+		}
+	}
+	return a
 }
 
 // TestResultToProto converts runner.TestResult to protobuf TestResult.
