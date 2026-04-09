@@ -131,6 +131,43 @@ Once running, open `http://localhost:8091` in your browser. The UI auto-refreshe
 
 ## Configuration
 
+### Authentication
+
+Define authentication at the top level of your config using the `auth` key. Only **one** auth type is allowed per config file. All tests use it automatically — set `auth: false` on individual tests to opt out.
+
+Auth field values support `{{ }}` placeholders just like headers and body.
+
+**Supported auth types:**
+
+```yaml
+# Basic Auth — sends Authorization: Basic <base64(user:pass)>
+auth:
+  basic_auth:
+    username: admin
+    password: "{{ get_password() }}"
+
+# Bearer Token — sends Authorization: Bearer <token>
+auth:
+  bearer:
+    token: "{{ get_token() }}"
+
+# API Key — sends a custom header
+auth:
+  api_key:
+    header: X-API-Key
+    key: "my-secret-key"
+
+# OAuth2 Client Credentials — fetches token from token_url, sends Authorization: Bearer <token>
+auth:
+  oauth2_client_credentials:
+    token_url: https://auth.example.com/token
+    client_id: my-client
+    client_secret: "{{ get_secret() }}"
+    scopes: ["read", "write"]
+```
+
+OAuth2 tokens are cached and automatically refreshed when they expire.
+
 ### Node-Specific Overrides
 
 You can configure different load parameters for specific nodes in your YAML config:
@@ -163,8 +200,13 @@ See `example-config.yaml` for a complete example:
 
 ```yaml
 funcs:
-  - name: token
-    cmd: ["echo", "Bearer", "test-token-12345"]
+  - name: get_password
+    cmd: ["echo", "test-password-12345"]
+
+auth:
+  basic_auth:
+    username: "testuser"
+    password: "{{ get_password() }}"
 
 tests:
   - name: api_login_test
@@ -174,8 +216,8 @@ tests:
     threads: 2
     run_seconds: 10
 
+    # Auth headers (Authorization: Basic ...) are added automatically.
     headers:
-      Authorization: "{{ token() }}"
       X-Request-Id: "{{ uuid() }}"
       X-Timestamp: "{{ now() }}"
       Content-Type: "application/json"
@@ -197,6 +239,18 @@ tests:
         threads: 1
       node-b:
         requests_per_second: 8
+
+  - name: api_get_public
+    path: "https://httpbin.org/get"
+    method: "GET"
+    auth: false  # Disable auth for this test
+    requests_per_second: 10
+    threads: 3
+    run_seconds: 5
+
+    assert:
+      status_code: 200
+      max_latency_ms: 1000
 ```
 
 ## Communication Protocol
