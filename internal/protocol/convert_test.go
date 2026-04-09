@@ -9,8 +9,15 @@ import (
 )
 
 func TestConfigRoundTrip(t *testing.T) {
+	f := false
 	cfg := &config.Config{
 		Funcs: []config.FuncDef{{Name: "x", Cmd: []string{"echo", "hi"}}},
+		Auth: &config.AuthConfig{
+			BasicAuth: &config.BasicAuthConfig{
+				Username: "admin",
+				Password: "secret",
+			},
+		},
 		Tests: []config.Test{{
 			Name: "t1", Path: "/p", Method: "GET",
 			RequestsPerSecond: 10, Threads: 2, RunSeconds: 5,
@@ -18,6 +25,10 @@ func TestConfigRoundTrip(t *testing.T) {
 			Body:    "{}",
 			Assert:  &config.Assertion{StatusCode: 200, MaxLatencyMs: 100},
 			Nodes:   map[string]config.Node{"n1": {RequestsPerSecond: 5, Threads: 1}},
+		}, {
+			Name: "t2", Path: "/q", Method: "POST",
+			RequestsPerSecond: 5, Threads: 1, RunSeconds: 3,
+			Auth: &f,
 		}},
 	}
 	pb := ConfigToProto(cfg)
@@ -28,7 +39,13 @@ func TestConfigRoundTrip(t *testing.T) {
 	if len(out.Funcs) != 1 || out.Funcs[0].Name != "x" {
 		t.Fatalf("funcs: %+v", out.Funcs)
 	}
-	if len(out.Tests) != 1 || out.Tests[0].Name != "t1" || out.Tests[0].RequestsPerSecond != 10 {
+	if out.Auth == nil || out.Auth.BasicAuth == nil {
+		t.Fatal("auth round-trip: missing basic_auth")
+	}
+	if out.Auth.BasicAuth.Username != "admin" || out.Auth.BasicAuth.Password != "secret" {
+		t.Fatalf("auth round-trip: %+v", out.Auth.BasicAuth)
+	}
+	if len(out.Tests) != 2 || out.Tests[0].Name != "t1" || out.Tests[0].RequestsPerSecond != 10 {
 		t.Fatalf("tests: %+v", out.Tests)
 	}
 	if out.Tests[0].Assert == nil || out.Tests[0].Assert.StatusCode != 200 {
@@ -36,6 +53,14 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if len(out.Tests[0].Nodes) != 1 {
 		t.Fatal("nodes round-trip")
+	}
+	// t1 has no auth override → Auth should be nil
+	if out.Tests[0].Auth != nil {
+		t.Fatal("t1.Auth should be nil")
+	}
+	// t2 has auth:false → AuthDisabled round-trip
+	if out.Tests[1].Auth == nil || *out.Tests[1].Auth != false {
+		t.Fatal("t2 auth_disabled round-trip")
 	}
 }
 

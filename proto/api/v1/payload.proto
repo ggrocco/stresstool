@@ -34,6 +34,35 @@ message StopTestsMessage {
 message Config {
   repeated FuncDef funcs = 1;
   repeated Test tests = 2;
+  AuthConfig auth = 3;
+}
+
+message AuthConfig {
+  BasicAuthConfig basic_auth = 1;
+  BearerAuthConfig bearer = 2;
+  APIKeyAuthConfig api_key = 3;
+  OAuth2ClientCredentialsConfig oauth2_client_credentials = 4;
+}
+
+message BasicAuthConfig {
+  string username = 1;
+  string password = 2;
+}
+
+message BearerAuthConfig {
+  string token = 1;
+}
+
+message APIKeyAuthConfig {
+  string header = 1;
+  string key = 2;
+}
+
+message OAuth2ClientCredentialsConfig {
+  string token_url = 1;
+  string client_id = 2;
+  string client_secret = 3;
+  repeated string scopes = 4;
 }
 
 message FuncDef {
@@ -52,6 +81,7 @@ message Test {
   string body = 8;
   Assertion assert = 9;
   map<string, NodeOverride> nodes = 10;
+  bool auth_disabled = 11;
 }
 
 message NodeOverride {

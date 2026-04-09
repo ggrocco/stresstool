@@ -22,7 +22,7 @@ func newTestRunner(t *testing.T, cfg *config.Config) *Runner {
 	}
 	eval := placeholders.NewEvaluator(cfg)
 	t.Cleanup(func() { eval.Close() })
-	return NewRunner(eval, false)
+	return NewRunner(eval, false, nil)
 }
 
 // runTest runs a test and collects all progress updates.
