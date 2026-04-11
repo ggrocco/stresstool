@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -175,6 +176,27 @@ func authConfigToProto(a *config.AuthConfig) *payloadpb.AuthConfig {
 			Scopes:       append([]string(nil), a.OAuth2ClientCredentials.Scopes...),
 		}
 	}
+	if a.JWT != nil {
+		jwt := &payloadpb.JWTAuthConfig{
+			TtlSeconds: int32(a.JWT.TTLSeconds),
+		}
+		if len(a.JWT.Header) > 0 {
+			if b, err := json.Marshal(a.JWT.Header); err == nil {
+				jwt.HeaderJson = string(b)
+			}
+		}
+		if len(a.JWT.Payload) > 0 {
+			if b, err := json.Marshal(a.JWT.Payload); err == nil {
+				jwt.PayloadJson = string(b)
+			}
+		}
+		if a.JWT.Signature != nil {
+			jwt.Signature = &payloadpb.JWTSignatureConfig{
+				Secret: a.JWT.Signature.Secret,
+			}
+		}
+		pb.Jwt = jwt
+	}
 	return pb
 }
 
@@ -207,6 +229,29 @@ func authConfigFromProto(pb *payloadpb.AuthConfig) *config.AuthConfig {
 			ClientSecret: pb.Oauth2ClientCredentials.ClientSecret,
 			Scopes:       append([]string(nil), pb.Oauth2ClientCredentials.Scopes...),
 		}
+	}
+	if pb.Jwt != nil {
+		jwt := &config.JWTAuthConfig{
+			TTLSeconds: int(pb.Jwt.TtlSeconds),
+		}
+		if pb.Jwt.HeaderJson != "" {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(pb.Jwt.HeaderJson), &m); err == nil {
+				jwt.Header = m
+			}
+		}
+		if pb.Jwt.PayloadJson != "" {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(pb.Jwt.PayloadJson), &m); err == nil {
+				jwt.Payload = m
+			}
+		}
+		if pb.Jwt.Signature != nil {
+			jwt.Signature = &config.JWTSignatureConfig{
+				Secret: pb.Jwt.Signature.Secret,
+			}
+		}
+		a.JWT = jwt
 	}
 	return a
 }
