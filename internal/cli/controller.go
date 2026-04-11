@@ -1025,7 +1025,11 @@ func printTestResult(result *runner.TestResult) {
 	metrics := result.Metrics
 
 	fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
-	fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+	if test.WarmupSeconds > 0 {
+		fmt.Printf("  Duration: %ds (+%ds warmup)\n", test.RunSeconds, test.WarmupSeconds)
+	} else {
+		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+	}
 	fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 		metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
 

@@ -20,11 +20,13 @@ func TestConfigRoundTrip(t *testing.T) {
 		},
 		Tests: []config.Test{{
 			Name: "t1", Path: "/p", Method: "GET",
-			RequestsPerSecond: 10, Threads: 2, RunSeconds: 5,
+			RequestsPerSecond: 10, Threads: 2, RunSeconds: 5, WarmupSeconds: 3,
 			Headers: map[string]string{"H": "v"},
 			Body:    "{}",
 			Assert:  &config.Assertion{StatusCode: 200, MaxLatencyMs: 100},
-			Nodes:   map[string]config.Node{"n1": {RequestsPerSecond: 5, Threads: 1}},
+			Nodes: map[string]config.Node{
+				"n1": {RequestsPerSecond: 5, Threads: 1, WarmupSeconds: 2},
+			},
 		}, {
 			Name: "t2", Path: "/q", Method: "POST",
 			RequestsPerSecond: 5, Threads: 1, RunSeconds: 3,
@@ -48,11 +50,17 @@ func TestConfigRoundTrip(t *testing.T) {
 	if len(out.Tests) != 2 || out.Tests[0].Name != "t1" || out.Tests[0].RequestsPerSecond != 10 {
 		t.Fatalf("tests: %+v", out.Tests)
 	}
+	if out.Tests[0].WarmupSeconds != 3 {
+		t.Fatalf("warmup_seconds round-trip: got %d", out.Tests[0].WarmupSeconds)
+	}
 	if out.Tests[0].Assert == nil || out.Tests[0].Assert.StatusCode != 200 {
 		t.Fatal("assert round-trip")
 	}
 	if len(out.Tests[0].Nodes) != 1 {
 		t.Fatal("nodes round-trip")
+	}
+	if out.Tests[0].Nodes["n1"].WarmupSeconds != 2 {
+		t.Fatalf("node warmup_seconds round-trip: got %d", out.Tests[0].Nodes["n1"].WarmupSeconds)
 	}
 	// t1 has no auth override → Auth should be nil
 	if out.Tests[0].Auth != nil {

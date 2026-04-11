@@ -82,11 +82,13 @@ message Test {
   Assertion assert = 9;
   map<string, NodeOverride> nodes = 10;
   bool auth_disabled = 11;
+  int32 warmup_seconds = 12;
 }
 
 message NodeOverride {
   int32 requests_per_second = 1;
   int32 threads = 2;
+  int32 warmup_seconds = 3;
 }
 
 message Assertion {

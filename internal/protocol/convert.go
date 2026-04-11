@@ -42,6 +42,7 @@ func testToProto(t *config.Test) *payloadpb.Test {
 		RequestsPerSecond: int32(t.RequestsPerSecond),
 		Threads:           int32(t.Threads),
 		RunSeconds:        int32(t.RunSeconds),
+		WarmupSeconds:     int32(t.WarmupSeconds),
 		Headers:           map[string]string{},
 		Body:              t.Body,
 		Nodes:             map[string]*payloadpb.NodeOverride{},
@@ -65,6 +66,7 @@ func testToProto(t *config.Test) *payloadpb.Test {
 		pb.Nodes[name] = &payloadpb.NodeOverride{
 			RequestsPerSecond: int32(n.RequestsPerSecond),
 			Threads:           int32(n.Threads),
+			WarmupSeconds:     int32(n.WarmupSeconds),
 		}
 	}
 	return pb
@@ -113,6 +115,7 @@ func testFromProto(t *payloadpb.Test) (*config.Test, error) {
 		RequestsPerSecond: int(t.RequestsPerSecond),
 		Threads:           int(t.Threads),
 		RunSeconds:        int(t.RunSeconds),
+		WarmupSeconds:     int(t.WarmupSeconds),
 		Headers:           map[string]string{},
 		Body:              t.Body,
 		Nodes:             map[string]config.Node{},
@@ -140,6 +143,7 @@ func testFromProto(t *payloadpb.Test) (*config.Test, error) {
 		out.Nodes[name] = config.Node{
 			RequestsPerSecond: int(n.RequestsPerSecond),
 			Threads:           int(n.Threads),
+			WarmupSeconds:     int(n.WarmupSeconds),
 		}
 	}
 	return out, nil

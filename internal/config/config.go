@@ -83,17 +83,25 @@ type Test struct {
 	RequestsPerSecond int               `yaml:"requests_per_second"`
 	Threads           int               `yaml:"threads"`
 	RunSeconds        int               `yaml:"run_seconds"`
-	Headers           map[string]string `yaml:"headers"`
-	Body              string            `yaml:"body"`
-	Assert            *Assertion        `yaml:"assert"`
-	Nodes             map[string]Node   `yaml:"nodes"`
-	Auth              *bool             `yaml:"auth,omitempty"` // nil=use config auth, false=disable
+	// WarmupSeconds is an optional ramp-up phase before the main run. During
+	// warmup the request rate increases linearly from 0 to requests_per_second,
+	// so the total test duration is WarmupSeconds + RunSeconds. Defaults to 0.
+	WarmupSeconds int               `yaml:"warmup_seconds,omitempty"`
+	Headers       map[string]string `yaml:"headers"`
+	Body          string            `yaml:"body"`
+	Assert        *Assertion        `yaml:"assert"`
+	Nodes         map[string]Node   `yaml:"nodes"`
+	Auth          *bool             `yaml:"auth,omitempty"` // nil=use config auth, false=disable
 }
 
 // Node allows overriding settings for a specific node name
 type Node struct {
 	RequestsPerSecond int `yaml:"requests_per_second"`
 	Threads           int `yaml:"threads"`
+	// WarmupSeconds overrides the test's warmup_seconds for this node. A value
+	// of 0 means "inherit from test"; use a negative value to disable warmup
+	// for this node specifically.
+	WarmupSeconds int `yaml:"warmup_seconds,omitempty"`
 }
 
 // Assertion defines what to check in responses
@@ -162,6 +170,9 @@ func (c *Config) Validate() error {
 		}
 		if test.RunSeconds <= 0 {
 			return fmt.Errorf("test[%d]: run_seconds must be > 0", i)
+		}
+		if test.WarmupSeconds < 0 {
+			return fmt.Errorf("test[%d]: warmup_seconds must be >= 0", i)
 		}
 		if test.Method == "" {
 			c.Tests[i].Method = "GET"
@@ -292,6 +303,13 @@ func (c *Config) WithNodeOverrides(nodeName string) *Config {
 			}
 			if nodeCfg.RequestsPerSecond > 0 {
 				updated.RequestsPerSecond = nodeCfg.RequestsPerSecond
+			}
+			// A negative node-level warmup means "disable warmup here"; 0
+			// means "inherit from the test default"; positive overrides.
+			if nodeCfg.WarmupSeconds < 0 {
+				updated.WarmupSeconds = 0
+			} else if nodeCfg.WarmupSeconds > 0 {
+				updated.WarmupSeconds = nodeCfg.WarmupSeconds
 			}
 		}
 		newConfig.Tests[i] = updated
