@@ -60,15 +60,16 @@ func (a *AuthConfig) AuthType() string {
 //   - Header defaults: {"alg": "HS256", "typ": "JWT"}
 //   - Payload defaults: {"iat": <now-unix>, "exp": <now+ttl-unix>}
 //
+// All values are flat string key/value pairs. Numeric claims like "exp" and
+// "iat" are coerced to JSON numbers automatically when the token is built.
 // The signing algorithm is read from Header["alg"] (supported: HS256, HS384,
-// HS512). String values inside Header/Payload are evaluated as placeholders,
-// so dynamic claims like {{ uuid() }} or {{ now() }} work the same as in
-// other auth types.
+// HS512). Values are evaluated as placeholders, so dynamic claims like
+// {{ uuid() }} or {{ now() }} work the same as in other auth types.
 type JWTAuthConfig struct {
-	// Header is the JWT header object; merged on top of the defaults.
-	Header map[string]any `yaml:"header,omitempty"`
-	// Payload is the JWT claims object; merged on top of the defaults.
-	Payload map[string]any `yaml:"payload,omitempty"`
+	// Header is the JWT header key/value pairs; merged on top of the defaults.
+	Header map[string]string `yaml:"header,omitempty"`
+	// Payload is the JWT claims key/value pairs; merged on top of the defaults.
+	Payload map[string]string `yaml:"payload,omitempty"`
 	// Signature holds the signing material for the algorithm in Header["alg"].
 	Signature *JWTSignatureConfig `yaml:"signature,omitempty"`
 	// TTLSeconds is the default "exp" lifetime in seconds (default: 3600).
@@ -309,18 +310,10 @@ func (a *AuthConfig) validate() error {
 }
 
 // jwtAlg returns the "alg" value from a JWT header map, falling back to the
-// default HS256 when not set. It is tolerant of common value types (string,
-// fmt.Stringer) and uppercases the result to match JOSE conventions.
-func jwtAlg(header map[string]any) string {
+// default HS256 when not set.
+func jwtAlg(header map[string]string) string {
 	const defaultAlg = "HS256"
-	if header == nil {
-		return defaultAlg
-	}
-	v, ok := header["alg"]
-	if !ok {
-		return defaultAlg
-	}
-	if s, ok := v.(string); ok && s != "" {
+	if s, ok := header["alg"]; ok && s != "" {
 		return strings.ToUpper(s)
 	}
 	return defaultAlg

@@ -45,12 +45,12 @@ message AuthConfig {
   JWTAuthConfig jwt = 5;
 }
 
-// JWTAuthConfig carries JSON Web Token auth configuration. The header and
-// payload objects are encoded as JSON strings so any JSON-compatible value
-// can be round-tripped without depending on google.protobuf.Struct.
+// JWTAuthConfig carries JSON Web Token auth configuration. Header and payload
+// are flat string key/value maps; numeric claims are coerced when the token
+// is built.
 message JWTAuthConfig {
-  string header_json = 1;
-  string payload_json = 2;
+  map<string, string> header = 1;
+  map<string, string> payload = 2;
   JWTSignatureConfig signature = 3;
   int32 ttl_seconds = 4;
 }

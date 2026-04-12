@@ -68,15 +68,15 @@ func TestConfigRoundTrip_JWT(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{
 			JWT: &config.JWTAuthConfig{
-				Header: map[string]any{
+				Header: map[string]string{
 					"alg": "HS384",
 					"typ": "JWT",
 					"kid": "k1",
 				},
-				Payload: map[string]any{
+				Payload: map[string]string{
 					"iss": "stresstool",
 					"sub": "loadtest",
-					"exp": float64(9999999999),
+					"exp": "9999999999",
 				},
 				Signature:  &config.JWTSignatureConfig{Secret: "shh"},
 				TTLSeconds: 900,

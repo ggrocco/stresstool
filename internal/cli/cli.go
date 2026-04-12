@@ -109,7 +109,7 @@ func dryRunValidation(cfg *config.Config) error {
 			switch {
 			case cfg.Auth.JWT != nil:
 				alg := "HS256"
-				if a, ok := cfg.Auth.JWT.Header["alg"].(string); ok && a != "" {
+				if a := cfg.Auth.JWT.Header["alg"]; a != "" {
 					alg = a
 				}
 				fmt.Printf("  Alg: %s\n", alg)

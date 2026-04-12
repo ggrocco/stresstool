@@ -100,7 +100,7 @@ func TestResolveJWT_DefaultsApplied(t *testing.T) {
 		t.Errorf("header.typ = %v, want JWT", got)
 	}
 
-	// Payload defaults
+	// Payload defaults: iat and exp should be JSON numbers (float64 after unmarshal)
 	iat, ok := payload["iat"].(float64)
 	if !ok {
 		t.Fatalf("payload.iat type = %T, want float64", payload["iat"])
@@ -120,15 +120,12 @@ func TestResolveJWT_DefaultsApplied(t *testing.T) {
 func TestResolveJWT_UserOverridesMergedOnTopOfDefaults(t *testing.T) {
 	r := NewResolver(&config.AuthConfig{
 		JWT: &config.JWTAuthConfig{
-			Header: map[string]any{
-				// Override alg; typ should keep default value.
+			Header: map[string]string{
 				"alg": "HS384",
-				// Add a new custom header field.
 				"kid": "key-1",
 			},
-			Payload: map[string]any{
-				// Override exp with an explicit value; iat should keep default.
-				"exp": int64(9999999999),
+			Payload: map[string]string{
+				"exp": "9999999999",
 				"sub": "user-42",
 				"iss": "stresstool",
 			},
@@ -163,6 +160,7 @@ func TestResolveJWT_UserOverridesMergedOnTopOfDefaults(t *testing.T) {
 	if payload["iss"] != "stresstool" {
 		t.Errorf("payload.iss = %v, want stresstool", payload["iss"])
 	}
+	// exp should be coerced to a JSON number
 	if int64(payload["exp"].(float64)) != 9999999999 {
 		t.Errorf("payload.exp = %v, want 9999999999", payload["exp"])
 	}
@@ -174,7 +172,7 @@ func TestResolveJWT_UserOverridesMergedOnTopOfDefaults(t *testing.T) {
 func TestResolveJWT_HS512(t *testing.T) {
 	r := NewResolver(&config.AuthConfig{
 		JWT: &config.JWTAuthConfig{
-			Header:    map[string]any{"alg": "HS512"},
+			Header:    map[string]string{"alg": "HS512"},
 			Signature: &config.JWTSignatureConfig{Secret: "long-secret-for-sha-512"},
 		},
 	})
@@ -206,7 +204,7 @@ func TestResolveJWT_PlaceholdersEvaluated(t *testing.T) {
 
 	r := NewResolver(&config.AuthConfig{
 		JWT: &config.JWTAuthConfig{
-			Payload: map[string]any{
+			Payload: map[string]string{
 				"sub": "{{ get_sub() }}",
 				"jti": "{{ uuid() }}",
 			},
@@ -273,27 +271,22 @@ func TestResolveJWT_MissingSignatureSecret(t *testing.T) {
 	}
 }
 
-func TestResolveJWT_NestedMapValuesEvaluated(t *testing.T) {
-	cfg := &config.Config{
-		Funcs: []config.FuncDef{
-			{Name: "get_tenant", Cmd: []string{"echo", "acme"}},
-		},
-	}
-	eval := placeholders.NewEvaluator(cfg)
-	defer eval.Close()
-
+func TestResolveJWT_NumericCoercion(t *testing.T) {
 	r := NewResolver(&config.AuthConfig{
 		JWT: &config.JWTAuthConfig{
-			Payload: map[string]any{
-				"ctx": map[string]any{
-					"tenant": "{{ get_tenant() }}",
-					"roles":  []any{"admin", "{{ get_tenant() }}-owner"},
-				},
+			Payload: map[string]string{
+				"count":    "42",
+				"ratio":    "3.14",
+				"flag":     "true",
+				"literal":  "hello",
 			},
 			Signature: &config.JWTSignatureConfig{Secret: "s"},
 		},
 	})
 	defer r.Close()
+
+	eval := newEval()
+	defer eval.Close()
 
 	headers, err := r.ResolveHeaders(eval)
 	if err != nil {
@@ -302,18 +295,20 @@ func TestResolveJWT_NestedMapValuesEvaluated(t *testing.T) {
 	token := strings.TrimPrefix(headers["Authorization"], "Bearer ")
 	_, payload := decodeJWT(t, token, "s")
 
-	ctx, ok := payload["ctx"].(map[string]any)
-	if !ok {
-		t.Fatalf("payload.ctx type = %T, want map", payload["ctx"])
+	// Integer coercion
+	if v, ok := payload["count"].(float64); !ok || int64(v) != 42 {
+		t.Errorf("count = %v (%T), want 42 (number)", payload["count"], payload["count"])
 	}
-	if ctx["tenant"] != "acme" {
-		t.Errorf("ctx.tenant = %v, want acme", ctx["tenant"])
+	// Float coercion
+	if v, ok := payload["ratio"].(float64); !ok || v != 3.14 {
+		t.Errorf("ratio = %v (%T), want 3.14 (number)", payload["ratio"], payload["ratio"])
 	}
-	roles, ok := ctx["roles"].([]any)
-	if !ok {
-		t.Fatalf("ctx.roles type = %T, want []any", ctx["roles"])
+	// Bool coercion
+	if v, ok := payload["flag"].(bool); !ok || v != true {
+		t.Errorf("flag = %v (%T), want true (bool)", payload["flag"], payload["flag"])
 	}
-	if len(roles) != 2 || roles[0] != "admin" || roles[1] != "acme-owner" {
-		t.Errorf("ctx.roles = %v, want [admin acme-owner]", roles)
+	// String stays string
+	if v, ok := payload["literal"].(string); !ok || v != "hello" {
+		t.Errorf("literal = %v (%T), want hello (string)", payload["literal"], payload["literal"])
 	}
 }

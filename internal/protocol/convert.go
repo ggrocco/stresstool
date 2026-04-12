@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,6 +8,18 @@ import (
 	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
 	"stresstool/internal/runner"
 )
+
+// copyStringMap returns a shallow copy of a string map (nil-safe).
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
 
 // ConfigToProto converts a config.Config to protobuf.
 func ConfigToProto(c *config.Config) *payloadpb.Config {
@@ -178,17 +189,9 @@ func authConfigToProto(a *config.AuthConfig) *payloadpb.AuthConfig {
 	}
 	if a.JWT != nil {
 		jwt := &payloadpb.JWTAuthConfig{
+			Header:     copyStringMap(a.JWT.Header),
+			Payload:    copyStringMap(a.JWT.Payload),
 			TtlSeconds: int32(a.JWT.TTLSeconds),
-		}
-		if len(a.JWT.Header) > 0 {
-			if b, err := json.Marshal(a.JWT.Header); err == nil {
-				jwt.HeaderJson = string(b)
-			}
-		}
-		if len(a.JWT.Payload) > 0 {
-			if b, err := json.Marshal(a.JWT.Payload); err == nil {
-				jwt.PayloadJson = string(b)
-			}
 		}
 		if a.JWT.Signature != nil {
 			jwt.Signature = &payloadpb.JWTSignatureConfig{
@@ -232,19 +235,9 @@ func authConfigFromProto(pb *payloadpb.AuthConfig) *config.AuthConfig {
 	}
 	if pb.Jwt != nil {
 		jwt := &config.JWTAuthConfig{
+			Header:     copyStringMap(pb.Jwt.Header),
+			Payload:    copyStringMap(pb.Jwt.Payload),
 			TTLSeconds: int(pb.Jwt.TtlSeconds),
-		}
-		if pb.Jwt.HeaderJson != "" {
-			var m map[string]any
-			if err := json.Unmarshal([]byte(pb.Jwt.HeaderJson), &m); err == nil {
-				jwt.Header = m
-			}
-		}
-		if pb.Jwt.PayloadJson != "" {
-			var m map[string]any
-			if err := json.Unmarshal([]byte(pb.Jwt.PayloadJson), &m); err == nil {
-				jwt.Payload = m
-			}
 		}
 		if pb.Jwt.Signature != nil {
 			jwt.Signature = &config.JWTSignatureConfig{

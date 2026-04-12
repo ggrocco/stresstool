@@ -445,13 +445,13 @@ func (x *AuthConfig) GetJwt() *JWTAuthConfig {
 	return nil
 }
 
-// JWTAuthConfig carries JSON Web Token auth configuration. The header and
-// payload objects are encoded as JSON strings so any JSON-compatible value
-// can be round-tripped without depending on google.protobuf.Struct.
+// JWTAuthConfig carries JSON Web Token auth configuration. Header and payload
+// are flat string key/value maps; numeric claims are coerced when the token
+// is built.
 type JWTAuthConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	HeaderJson    string                 `protobuf:"bytes,1,opt,name=header_json,json=headerJson,proto3" json:"header_json,omitempty"`
-	PayloadJson   string                 `protobuf:"bytes,2,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
+	Header        map[string]string      `protobuf:"bytes,1,rep,name=header,proto3" json:"header,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Payload       map[string]string      `protobuf:"bytes,2,rep,name=payload,proto3" json:"payload,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Signature     *JWTSignatureConfig    `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
 	TtlSeconds    int32                  `protobuf:"varint,4,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -488,18 +488,18 @@ func (*JWTAuthConfig) Descriptor() ([]byte, []int) {
 	return file_api_v1_payload_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *JWTAuthConfig) GetHeaderJson() string {
+func (x *JWTAuthConfig) GetHeader() map[string]string {
 	if x != nil {
-		return x.HeaderJson
+		return x.Header
 	}
-	return ""
+	return nil
 }
 
-func (x *JWTAuthConfig) GetPayloadJson() string {
+func (x *JWTAuthConfig) GetPayload() map[string]string {
 	if x != nil {
-		return x.PayloadJson
+		return x.Payload
 	}
-	return ""
+	return nil
 }
 
 func (x *JWTAuthConfig) GetSignature() *JWTSignatureConfig {
@@ -1774,14 +1774,19 @@ const file_api_v1_payload_proto_rawDesc = "" +
 	"\x06bearer\x18\x02 \x01(\v2\x1f.stresstool.v1.BearerAuthConfigR\x06bearer\x128\n" +
 	"\aapi_key\x18\x03 \x01(\v2\x1f.stresstool.v1.APIKeyAuthConfigR\x06apiKey\x12h\n" +
 	"\x19oauth2_client_credentials\x18\x04 \x01(\v2,.stresstool.v1.OAuth2ClientCredentialsConfigR\x17oauth2ClientCredentials\x12.\n" +
-	"\x03jwt\x18\x05 \x01(\v2\x1c.stresstool.v1.JWTAuthConfigR\x03jwt\"\xb5\x01\n" +
-	"\rJWTAuthConfig\x12\x1f\n" +
-	"\vheader_json\x18\x01 \x01(\tR\n" +
-	"headerJson\x12!\n" +
-	"\fpayload_json\x18\x02 \x01(\tR\vpayloadJson\x12?\n" +
+	"\x03jwt\x18\x05 \x01(\v2\x1c.stresstool.v1.JWTAuthConfigR\x03jwt\"\xef\x02\n" +
+	"\rJWTAuthConfig\x12@\n" +
+	"\x06header\x18\x01 \x03(\v2(.stresstool.v1.JWTAuthConfig.HeaderEntryR\x06header\x12C\n" +
+	"\apayload\x18\x02 \x03(\v2).stresstool.v1.JWTAuthConfig.PayloadEntryR\apayload\x12?\n" +
 	"\tsignature\x18\x03 \x01(\v2!.stresstool.v1.JWTSignatureConfigR\tsignature\x12\x1f\n" +
 	"\vttl_seconds\x18\x04 \x01(\x05R\n" +
-	"ttlSeconds\",\n" +
+	"ttlSeconds\x1a9\n" +
+	"\vHeaderEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a:\n" +
+	"\fPayloadEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\",\n" +
 	"\x12JWTSignatureConfig\x12\x16\n" +
 	"\x06secret\x18\x01 \x01(\tR\x06secret\"I\n" +
 	"\x0fBasicAuthConfig\x12\x1a\n" +
@@ -1901,7 +1906,7 @@ func file_api_v1_payload_proto_rawDescGZIP() []byte {
 	return file_api_v1_payload_proto_rawDescData
 }
 
-var file_api_v1_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_api_v1_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_api_v1_payload_proto_goTypes = []any{
 	(*NodeMessage)(nil),                   // 0: stresstool.v1.NodeMessage
 	(*ControllerMessage)(nil),             // 1: stresstool.v1.ControllerMessage
@@ -1929,10 +1934,12 @@ var file_api_v1_payload_proto_goTypes = []any{
 	(*StartTestsMessage)(nil),             // 23: stresstool.v1.StartTestsMessage
 	(*ErrorMessage)(nil),                  // 24: stresstool.v1.ErrorMessage
 	(*CompleteMessage)(nil),               // 25: stresstool.v1.CompleteMessage
-	nil,                                   // 26: stresstool.v1.Test.HeadersEntry
-	nil,                                   // 27: stresstool.v1.Test.NodesEntry
-	nil,                                   // 28: stresstool.v1.Metrics.StatusCodesEntry
-	nil,                                   // 29: stresstool.v1.Metrics.ErrorsEntry
+	nil,                                   // 26: stresstool.v1.JWTAuthConfig.HeaderEntry
+	nil,                                   // 27: stresstool.v1.JWTAuthConfig.PayloadEntry
+	nil,                                   // 28: stresstool.v1.Test.HeadersEntry
+	nil,                                   // 29: stresstool.v1.Test.NodesEntry
+	nil,                                   // 30: stresstool.v1.Metrics.StatusCodesEntry
+	nil,                                   // 31: stresstool.v1.Metrics.ErrorsEntry
 }
 var file_api_v1_payload_proto_depIdxs = []int32{
 	15, // 0: stresstool.v1.NodeMessage.hello:type_name -> stresstool.v1.HelloMessage
@@ -1952,25 +1959,27 @@ var file_api_v1_payload_proto_depIdxs = []int32{
 	9,  // 14: stresstool.v1.AuthConfig.api_key:type_name -> stresstool.v1.APIKeyAuthConfig
 	10, // 15: stresstool.v1.AuthConfig.oauth2_client_credentials:type_name -> stresstool.v1.OAuth2ClientCredentialsConfig
 	5,  // 16: stresstool.v1.AuthConfig.jwt:type_name -> stresstool.v1.JWTAuthConfig
-	6,  // 17: stresstool.v1.JWTAuthConfig.signature:type_name -> stresstool.v1.JWTSignatureConfig
-	26, // 18: stresstool.v1.Test.headers:type_name -> stresstool.v1.Test.HeadersEntry
-	14, // 19: stresstool.v1.Test.assert:type_name -> stresstool.v1.Assertion
-	27, // 20: stresstool.v1.Test.nodes:type_name -> stresstool.v1.Test.NodesEntry
-	3,  // 21: stresstool.v1.TestSpecMessage.config:type_name -> stresstool.v1.Config
-	19, // 22: stresstool.v1.TestResultMessage.result:type_name -> stresstool.v1.TestResult
-	12, // 23: stresstool.v1.TestResult.test:type_name -> stresstool.v1.Test
-	21, // 24: stresstool.v1.TestResult.metrics:type_name -> stresstool.v1.Metrics
-	20, // 25: stresstool.v1.TestResult.assertions:type_name -> stresstool.v1.Assertions
-	28, // 26: stresstool.v1.Metrics.status_codes:type_name -> stresstool.v1.Metrics.StatusCodesEntry
-	29, // 27: stresstool.v1.Metrics.errors:type_name -> stresstool.v1.Metrics.ErrorsEntry
-	13, // 28: stresstool.v1.Test.NodesEntry.value:type_name -> stresstool.v1.NodeOverride
-	0,  // 29: stresstool.v1.StressTestService.Session:input_type -> stresstool.v1.NodeMessage
-	1,  // 30: stresstool.v1.StressTestService.Session:output_type -> stresstool.v1.ControllerMessage
-	30, // [30:31] is the sub-list for method output_type
-	29, // [29:30] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	26, // 17: stresstool.v1.JWTAuthConfig.header:type_name -> stresstool.v1.JWTAuthConfig.HeaderEntry
+	27, // 18: stresstool.v1.JWTAuthConfig.payload:type_name -> stresstool.v1.JWTAuthConfig.PayloadEntry
+	6,  // 19: stresstool.v1.JWTAuthConfig.signature:type_name -> stresstool.v1.JWTSignatureConfig
+	28, // 20: stresstool.v1.Test.headers:type_name -> stresstool.v1.Test.HeadersEntry
+	14, // 21: stresstool.v1.Test.assert:type_name -> stresstool.v1.Assertion
+	29, // 22: stresstool.v1.Test.nodes:type_name -> stresstool.v1.Test.NodesEntry
+	3,  // 23: stresstool.v1.TestSpecMessage.config:type_name -> stresstool.v1.Config
+	19, // 24: stresstool.v1.TestResultMessage.result:type_name -> stresstool.v1.TestResult
+	12, // 25: stresstool.v1.TestResult.test:type_name -> stresstool.v1.Test
+	21, // 26: stresstool.v1.TestResult.metrics:type_name -> stresstool.v1.Metrics
+	20, // 27: stresstool.v1.TestResult.assertions:type_name -> stresstool.v1.Assertions
+	30, // 28: stresstool.v1.Metrics.status_codes:type_name -> stresstool.v1.Metrics.StatusCodesEntry
+	31, // 29: stresstool.v1.Metrics.errors:type_name -> stresstool.v1.Metrics.ErrorsEntry
+	13, // 30: stresstool.v1.Test.NodesEntry.value:type_name -> stresstool.v1.NodeOverride
+	0,  // 31: stresstool.v1.StressTestService.Session:input_type -> stresstool.v1.NodeMessage
+	1,  // 32: stresstool.v1.StressTestService.Session:output_type -> stresstool.v1.ControllerMessage
+	32, // [32:33] is the sub-list for method output_type
+	31, // [31:32] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_payload_proto_init() }
@@ -1997,7 +2006,7 @@ func file_api_v1_payload_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_payload_proto_rawDesc), len(file_api_v1_payload_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

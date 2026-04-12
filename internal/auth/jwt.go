@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 )
 
 // Default JWT header block. User-provided Header values are merged on top.
-var defaultJWTHeader = map[string]any{
+var defaultJWTHeader = map[string]string{
 	"alg": "HS256",
 	"typ": "JWT",
 }
@@ -25,8 +26,8 @@ var defaultJWTHeader = map[string]any{
 const defaultJWTTTLSeconds = 3600
 
 // buildJWT assembles a signed JWT from the user's config block merged on top
-// of the default header and payload blocks. String values inside either map
-// are evaluated as placeholders so dynamic claims (e.g. {{ uuid() }}) work.
+// of the default header and payload blocks. Every value is evaluated through
+// the placeholder engine then coerced to JSON types for the final token.
 func buildJWT(cfg *config.JWTAuthConfig, eval *placeholders.Evaluator) (string, error) {
 	if cfg == nil {
 		return "", fmt.Errorf("jwt: config is nil")
@@ -42,9 +43,9 @@ func buildJWT(cfg *config.JWTAuthConfig, eval *placeholders.Evaluator) (string, 
 	now := time.Now().Unix()
 
 	// Payload defaults: iat and exp. Users can override either one.
-	defaultPayload := map[string]any{
-		"iat": now,
-		"exp": now + int64(ttl),
+	defaultPayload := map[string]string{
+		"iat": strconv.FormatInt(now, 10),
+		"exp": strconv.FormatInt(now+int64(ttl), 10),
 	}
 
 	header, err := mergeAndEvaluate(defaultJWTHeader, cfg.Header, eval)
@@ -56,8 +57,7 @@ func buildJWT(cfg *config.JWTAuthConfig, eval *placeholders.Evaluator) (string, 
 		return "", fmt.Errorf("jwt: payload: %w", err)
 	}
 
-	alg, _ := header["alg"].(string)
-	alg = strings.ToUpper(alg)
+	alg := strings.ToUpper(header["alg"])
 	if alg == "" {
 		alg = "HS256"
 		header["alg"] = alg
@@ -71,11 +71,11 @@ func buildJWT(cfg *config.JWTAuthConfig, eval *placeholders.Evaluator) (string, 
 		return "", fmt.Errorf("jwt: signature.secret is required")
 	}
 
-	headerBytes, err := json.Marshal(header)
+	headerBytes, err := claimsJSON(header)
 	if err != nil {
 		return "", fmt.Errorf("jwt: marshal header: %w", err)
 	}
-	payloadBytes, err := json.Marshal(payload)
+	payloadBytes, err := claimsJSON(payload)
 	if err != nil {
 		return "", fmt.Errorf("jwt: marshal payload: %w", err)
 	}
@@ -88,6 +88,32 @@ func buildJWT(cfg *config.JWTAuthConfig, eval *placeholders.Evaluator) (string, 
 	}
 
 	return signingInput + "." + base64URLEncode(sig), nil
+}
+
+// claimsJSON serialises a flat string map into a JSON object, coercing values
+// that look like numbers or booleans into their native JSON types so the token
+// conforms to RFC 7519 (e.g. "exp" must be a Number, not a String).
+func claimsJSON(m map[string]string) ([]byte, error) {
+	obj := make(map[string]any, len(m))
+	for k, v := range m {
+		obj[k] = coerceJSONValue(v)
+	}
+	return json.Marshal(obj)
+}
+
+// coerceJSONValue converts a string to a native JSON type when possible.
+// Priority: integer → float → boolean → string.
+func coerceJSONValue(s string) any {
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	if b, err := strconv.ParseBool(s); err == nil {
+		return b
+	}
+	return s
 }
 
 // signJWT computes the HMAC signature for the given algorithm.
@@ -114,61 +140,21 @@ func base64URLEncode(b []byte) string {
 }
 
 // mergeAndEvaluate returns a new map that is the shallow merge of `overrides`
-// on top of `defaults`, with every string leaf evaluated via the placeholder
-// engine. Nested maps and slices are traversed recursively so placeholders
-// work anywhere in the structure.
-func mergeAndEvaluate(defaults, overrides map[string]any, eval *placeholders.Evaluator) (map[string]any, error) {
-	merged := make(map[string]any, len(defaults)+len(overrides))
+// on top of `defaults`, with every value evaluated via the placeholder engine.
+func mergeAndEvaluate(defaults, overrides map[string]string, eval *placeholders.Evaluator) (map[string]string, error) {
+	merged := make(map[string]string, len(defaults)+len(overrides))
 	for k, v := range defaults {
 		merged[k] = v
 	}
 	for k, v := range overrides {
 		merged[k] = v
 	}
-	return evaluateMap(merged, eval)
-}
-
-func evaluateMap(m map[string]any, eval *placeholders.Evaluator) (map[string]any, error) {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		ev, err := evaluateValue(v, eval)
+	for k, v := range merged {
+		ev, err := eval.Evaluate(v)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", k, err)
 		}
-		out[k] = ev
+		merged[k] = ev
 	}
-	return out, nil
-}
-
-func evaluateValue(v any, eval *placeholders.Evaluator) (any, error) {
-	switch x := v.(type) {
-	case string:
-		return eval.Evaluate(x)
-	case map[string]any:
-		return evaluateMap(x, eval)
-	case map[any]any:
-		// yaml.v3 typically produces map[string]any, but older decodings may
-		// yield map[any]any. Normalize to map[string]any.
-		norm := make(map[string]any, len(x))
-		for k, val := range x {
-			ks, ok := k.(string)
-			if !ok {
-				ks = fmt.Sprintf("%v", k)
-			}
-			norm[ks] = val
-		}
-		return evaluateMap(norm, eval)
-	case []any:
-		out := make([]any, len(x))
-		for i, item := range x {
-			ev, err := evaluateValue(item, eval)
-			if err != nil {
-				return nil, err
-			}
-			out[i] = ev
-		}
-		return out, nil
-	default:
-		return v, nil
-	}
+	return merged, nil
 }

@@ -58,7 +58,7 @@ func TestValidateAuth_MissingRequiredFields(t *testing.T) {
 		{"jwt no signature", &AuthConfig{JWT: &JWTAuthConfig{}}, "signature is required"},
 		{"jwt no secret", &AuthConfig{JWT: &JWTAuthConfig{Signature: &JWTSignatureConfig{}}}, "signature.secret is required"},
 		{"jwt bad alg", &AuthConfig{JWT: &JWTAuthConfig{
-			Header:    map[string]any{"alg": "RS256"},
+			Header:    map[string]string{"alg": "RS256"},
 			Signature: &JWTSignatureConfig{Secret: "s"},
 		}}, "unsupported alg"},
 		{"jwt negative ttl", &AuthConfig{JWT: &JWTAuthConfig{
