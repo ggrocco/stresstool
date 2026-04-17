@@ -1,10 +1,12 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,9 +21,9 @@ type Config struct {
 // AuthConfig holds auth configuration keyed by type. Only one type may be set.
 type AuthConfig struct {
 	BasicAuth               *BasicAuthConfig               `yaml:"basic_auth,omitempty"`
-	Bearer                  *BearerAuthConfig               `yaml:"bearer,omitempty"`
-	APIKey                  *APIKeyAuthConfig                `yaml:"api_key,omitempty"`
-	OAuth2ClientCredentials *OAuth2ClientCredentialsConfig   `yaml:"oauth2_client_credentials,omitempty"`
+	Bearer                  *BearerAuthConfig              `yaml:"bearer,omitempty"`
+	APIKey                  *APIKeyAuthConfig              `yaml:"api_key,omitempty"`
+	OAuth2ClientCredentials *OAuth2ClientCredentialsConfig `yaml:"oauth2_client_credentials,omitempty"`
 }
 
 // AuthType returns which auth type is configured, or "" if none.
@@ -74,6 +76,8 @@ type FuncDef struct {
 	Name string   `yaml:"name"`
 	Cmd  []string `yaml:"cmd"`
 }
+
+const defaultFuncTimeout = 30 * time.Second
 
 // Test defines a single HTTP stress test
 type Test struct {
@@ -266,9 +270,15 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 		return "", fmt.Errorf("empty command")
 	}
 
-	cmd := exec.Command(f.Cmd[0], f.Cmd[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultFuncTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, f.Cmd[0], f.Cmd[1:]...)
 	output, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("failed to execute %s: timed out after %s", f.Name, defaultFuncTimeout)
+		}
 		return "", fmt.Errorf("failed to execute %s: %w", f.Name, err)
 	}
 

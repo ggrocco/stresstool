@@ -1,8 +1,10 @@
 package config
 
 import (
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateAuth_SingleType(t *testing.T) {
@@ -204,4 +206,45 @@ tests:
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validation failed: %v", err)
 	}
+}
+
+func TestExecuteFunc(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		f := &FuncDef{
+			Name: "echo",
+			Cmd:  []string{"echo", "-n", "ok"},
+		}
+		got, err := f.ExecuteFunc()
+		if err != nil {
+			t.Fatalf("ExecuteFunc() error = %v", err)
+		}
+		if got != "ok" {
+			t.Fatalf("ExecuteFunc() = %q, want ok", got)
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping timeout test in short mode")
+		}
+		if runtime.GOOS == "windows" {
+			t.Skip("requires sh")
+		}
+
+		start := time.Now()
+		f := &FuncDef{
+			Name: "sleep",
+			Cmd:  []string{"sleep", "35"},
+		}
+		_, err := f.ExecuteFunc()
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+		if !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 33*time.Second {
+			t.Fatalf("timeout should happen around 30s, took %s", elapsed)
+		}
+	})
 }
