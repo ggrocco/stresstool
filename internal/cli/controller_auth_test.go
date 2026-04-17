@@ -127,6 +127,24 @@ func TestHandleLogin_SetsCookieOnValidToken(t *testing.T) {
 	}
 }
 
+func TestHandleLogin_RendersTemplate(t *testing.T) {
+	c := &Controller{authToken: "secret-token"}
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	c.handleLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`<form method="POST" action="/login"`, `STRESSTOOL_WEB_TOKEN`, `/login.css`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login page missing %q\nbody: %s", want, body)
+		}
+	}
+}
+
 func TestHandleLogin_RejectsWrongToken(t *testing.T) {
 	c := &Controller{authToken: "secret-token"}
 

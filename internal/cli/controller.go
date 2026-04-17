@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"html"
+	"html/template"
 	"io"
 	"io/fs"
 	"net"
@@ -33,6 +33,11 @@ const (
 	authCookieName = "stresstool_auth"
 	authTokenEnv   = "STRESSTOOL_WEB_TOKEN"
 )
+
+// loginTmpl is the parsed sign-in page. The source lives at web/login.html so
+// operators can iterate on the markup without touching Go code; html/template
+// auto-escapes substituted values to keep the error message XSS-safe.
+var loginTmpl = template.Must(template.ParseFS(webFS, "web/login.html"))
 
 //go:embed web
 var webFS embed.FS
@@ -733,6 +738,7 @@ func (c *Controller) startUIServer() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", c.handleLogin)
+	mux.HandleFunc("/login.css", c.handleLoginCSS)
 	mux.HandleFunc("/logout", c.handleLogout)
 	mux.HandleFunc("/", c.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -1153,30 +1159,23 @@ func writeLoginPage(w http.ResponseWriter, errMsg string, status int) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(status)
-	errBlock := ""
-	if errMsg != "" {
-		errBlock = `<p class="err">` + html.EscapeString(errMsg) + `</p>`
+	_ = loginTmpl.Execute(w, struct {
+		Error  string
+		EnvVar string
+	}{Error: errMsg, EnvVar: authTokenEnv})
+}
+
+// handleLoginCSS serves the sign-in stylesheet. It must be publicly reachable
+// so unauthenticated browsers can render /login before the user has a cookie.
+func (c *Controller) handleLoginCSS(w http.ResponseWriter, r *http.Request) {
+	data, err := fs.ReadFile(webFS, "web/login.css")
+	if err != nil {
+		http.NotFound(w, r)
+		return
 	}
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>stresstool — Sign in</title>
-<style>
-body{font-family:system-ui,sans-serif;max-width:420px;margin:100px auto;padding:20px;color:#111}
-h1{font-size:20px;margin-bottom:24px}
-label{display:block;margin-bottom:6px;font-size:14px}
-input{width:100%%;padding:10px;margin-bottom:12px;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;font-family:monospace}
-button{padding:10px 20px;background:#2563eb;color:white;border:0;border-radius:4px;cursor:pointer;font-size:14px}
-.err{color:#b91c1c;font-size:14px;margin-top:12px}
-.hint{color:#666;font-size:12px;margin-top:16px}
-</style></head><body>
-<h1>stresstool — Sign in</h1>
-<form method="POST" action="/login" autocomplete="off">
-<label for="token">Auth token</label>
-<input id="token" name="token" type="password" autofocus required>
-<button type="submit">Sign in</button>
-%s
-</form>
-<p class="hint">The token is printed to the controller console on startup, or set via the %s environment variable.</p>
-</body></html>`, errBlock, authTokenEnv)
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Write(data)
 }
 
 func printTestResult(result *runner.TestResult) {

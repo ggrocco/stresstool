@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>stresstool — Sign in</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/login.css">
+</head>
+<body>
+  <main class="login">
+    <h1>stresstool — Sign in</h1>
+    <form method="POST" action="/login" autocomplete="off">
+      <label for="token">Auth token</label>
+      <input id="token" name="token" type="password" autofocus required>
+      <button type="submit">Sign in</button>
+      {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+    </form>
+    <p class="hint">
+      The token is printed to the controller console on startup, or set via the
+      <code>{{.EnvVar}}</code> environment variable.
+    </p>
+  </main>
+</body>
+</html>
