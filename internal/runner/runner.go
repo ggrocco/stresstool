@@ -208,11 +208,13 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 	if r.authResolver != nil && (test.Auth == nil || *test.Auth) {
 		authHeaders, err := r.authResolver.ResolveHeaders(r.evaluator)
 		if err != nil {
-			errMsg := fmt.Sprintf("auth resolution failed: %v", err)
+			// The detailed error may contain upstream response bodies or URLs
+			// that could leak credentials; keep it out of the metrics (which
+			// are served via /api/results). Only verbose stderr gets details.
 			if r.verbose {
-				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+				fmt.Printf("[ERROR] %s: auth resolution failed: %v\n", test.Name, err)
 			}
-			metrics.AddRequestWithError(0, 0, false, errMsg)
+			metrics.AddRequestWithError(0, 0, false, "auth resolution failed")
 			return
 		}
 		for k, v := range authHeaders {

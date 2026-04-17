@@ -3,9 +3,13 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"net"
@@ -23,6 +27,11 @@ import (
 	"stresstool/internal/protocol"
 	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
 	"stresstool/internal/runner"
+)
+
+const (
+	authCookieName = "stresstool_auth"
+	authTokenEnv   = "STRESSTOOL_WEB_TOKEN"
 )
 
 //go:embed web
@@ -117,6 +126,10 @@ type Controller struct {
 	completionMu   sync.Mutex
 	uiMu           sync.Mutex
 	uiServer       *http.Server
+
+	// authToken gates access to the web UI and /api/* endpoints. Resolved from
+	// STRESSTOOL_WEB_TOKEN or auto-generated when the web UI is enabled.
+	authToken string
 }
 
 // NodeConnection represents a connected node (gRPC session).
@@ -185,6 +198,15 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		cfgYAML = data
 	}
 
+	var authToken string
+	if uiAddr != "" {
+		token, err := resolveWebAuthToken()
+		if err != nil {
+			return fmt.Errorf("web auth token: %w", err)
+		}
+		authToken = token
+	}
+
 	ctrl := &Controller{
 		listenAddr:     listenAddr,
 		uiAddr:         uiAddr,
@@ -194,6 +216,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		parallel:       parallel,
 		verbose:        verbose,
 		tlsOpts:        tlsOpts,
+		authToken:      authToken,
 		eventChan:      make(chan controllerEvent, 100),
 		queryChan:      make(chan stateQuery),
 		completionChan: make(chan struct{}),
@@ -709,7 +732,9 @@ func (c *Controller) startUIServer() {
 	staticFS := http.FileServer(http.FS(webContent))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/login", c.handleLogin)
+	mux.HandleFunc("/logout", c.handleLogout)
+	mux.HandleFunc("/", c.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -723,17 +748,17 @@ func (c *Controller) startUIServer() {
 		data, _ := io.ReadAll(f)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(data)
-	})
-	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
-	mux.HandleFunc("/api/nodes", c.handleAPINodes)
-	mux.HandleFunc("/api/start", c.handleAPIStart)
-	mux.HandleFunc("/api/stop", c.handleAPIStop)
-	mux.HandleFunc("/api/exit", c.handleAPIExit)
-	mux.HandleFunc("/api/run-status", c.handleAPIRunStatus)
-	mux.HandleFunc("/api/config", c.handleAPIConfig)
-	mux.HandleFunc("/api/results", c.handleAPIResults)
-	mux.HandleFunc("/api/progress-series", c.handleAPIProgressSeries)
-	mux.HandleFunc("/api/logs", c.handleAPILogs)
+	}))
+	mux.Handle("/static/", c.requireAuth(http.StripPrefix("/static/", staticFS).ServeHTTP))
+	mux.HandleFunc("/api/nodes", c.requireAuth(c.handleAPINodes))
+	mux.HandleFunc("/api/start", c.requireAuth(c.handleAPIStart))
+	mux.HandleFunc("/api/stop", c.requireAuth(c.handleAPIStop))
+	mux.HandleFunc("/api/exit", c.requireAuth(c.handleAPIExit))
+	mux.HandleFunc("/api/run-status", c.requireAuth(c.handleAPIRunStatus))
+	mux.HandleFunc("/api/config", c.requireAuth(c.handleAPIConfig))
+	mux.HandleFunc("/api/results", c.requireAuth(c.handleAPIResults))
+	mux.HandleFunc("/api/progress-series", c.requireAuth(c.handleAPIProgressSeries))
+	mux.HandleFunc("/api/logs", c.requireAuth(c.handleAPILogs))
 
 	srv := &http.Server{Addr: c.uiAddr, Handler: mux}
 	c.uiMu.Lock()
@@ -1018,6 +1043,140 @@ func (c *Controller) handleAPILogs(w http.ResponseWriter, r *http.Request) {
 		"lines": res.lines,
 		"total": res.total,
 	})
+}
+
+// resolveWebAuthToken returns the token from STRESSTOOL_WEB_TOKEN, or generates
+// a random one and prints it to stdout so operators can log in.
+func resolveWebAuthToken() (string, error) {
+	if t := strings.TrimSpace(os.Getenv(authTokenEnv)); t != "" {
+		return t, nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generating auth token: %w", err)
+	}
+	token := hex.EncodeToString(buf)
+	fmt.Printf("Web UI auth token: %s\n  (Set %s to use a fixed token; visit /login to sign in.)\n", token, authTokenEnv)
+	return token, nil
+}
+
+// requireAuth wraps a handler so it rejects requests without a valid token.
+// Accepts the token via `Authorization: Bearer <token>` or the auth cookie.
+// Browser requests that lack credentials are redirected to /login.
+func (c *Controller) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c.authTokenValid(r) {
+			next(w, r)
+			return
+		}
+		// API and static asset requests get a bare 401; browser navigations get
+		// redirected to the login form so users can recover.
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/static/") {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="stresstool"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	}
+}
+
+// authTokenValid returns true if the request carries the expected auth token.
+// Comparisons are constant-time to avoid leaking the token via timing.
+func (c *Controller) authTokenValid(r *http.Request) bool {
+	if c.authToken == "" {
+		return false
+	}
+	expected := []byte(c.authToken)
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		if subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(h, "Bearer ")), expected) == 1 {
+			return true
+		}
+	}
+	if ck, err := r.Cookie(authCookieName); err == nil {
+		if subtle.ConstantTimeCompare([]byte(ck.Value), expected) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// handleLogin renders the sign-in form (GET) and validates a posted token (POST).
+// On success a SameSite=Strict, HttpOnly cookie is set so subsequent requests
+// from the same origin are authenticated without exposing the token to XSS.
+func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if c.authTokenValid(r) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		writeLoginPage(w, "", http.StatusOK)
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			writeLoginPage(w, "Invalid form submission.", http.StatusBadRequest)
+			return
+		}
+		submitted := r.PostForm.Get("token")
+		if submitted == "" || subtle.ConstantTimeCompare([]byte(submitted), []byte(c.authToken)) != 1 {
+			writeLoginPage(w, "Invalid token.", http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     authCookieName,
+			Value:    c.authToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   r.TLS != nil,
+		})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleLogout clears the auth cookie and redirects to the login form.
+func (c *Controller) handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func writeLoginPage(w http.ResponseWriter, errMsg string, status int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.WriteHeader(status)
+	errBlock := ""
+	if errMsg != "" {
+		errBlock = `<p class="err">` + html.EscapeString(errMsg) + `</p>`
+	}
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>stresstool — Sign in</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:420px;margin:100px auto;padding:20px;color:#111}
+h1{font-size:20px;margin-bottom:24px}
+label{display:block;margin-bottom:6px;font-size:14px}
+input{width:100%%;padding:10px;margin-bottom:12px;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;font-family:monospace}
+button{padding:10px 20px;background:#2563eb;color:white;border:0;border-radius:4px;cursor:pointer;font-size:14px}
+.err{color:#b91c1c;font-size:14px;margin-top:12px}
+.hint{color:#666;font-size:12px;margin-top:16px}
+</style></head><body>
+<h1>stresstool — Sign in</h1>
+<form method="POST" action="/login" autocomplete="off">
+<label for="token">Auth token</label>
+<input id="token" name="token" type="password" autofocus required>
+<button type="submit">Sign in</button>
+%s
+</form>
+<p class="hint">The token is printed to the controller console on startup, or set via the %s environment variable.</p>
+</body></html>`, errBlock, authTokenEnv)
 }
 
 func printTestResult(result *runner.TestResult) {

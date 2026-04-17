@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"stresstool/internal/config"
 )
@@ -113,6 +114,39 @@ func TestEvaluate_InvalidJS(t *testing.T) {
 	_, err := e.Evaluate(`{{js("(((invalid")}}`)
 	if err == nil {
 		t.Fatal("expected error for invalid JS, got nil")
+	}
+}
+
+// TestEvaluate_InfiniteLoopTimesOut verifies that a runaway JS expression is
+// interrupted so the evaluator goroutine isn't permanently hung.
+func TestEvaluate_InfiniteLoopTimesOut(t *testing.T) {
+	e := newTestEvaluator()
+	defer e.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		// No braces inside the JS string — the placeholder regex stops at `}`,
+		// so the whole body must be brace-free to actually reach the VM.
+		_, err := e.Evaluate(`{{js("while(true);")}}`)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected timeout error, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("evaluation did not time out")
+	}
+
+	// Evaluator must still work after the interrupt.
+	got, err := e.Evaluate(`{{js("1 + 1")}}`)
+	if err != nil {
+		t.Fatalf("evaluator broken after timeout: %v", err)
+	}
+	if got != "2" {
+		t.Fatalf("expected 2, got %q", got)
 	}
 }
 

@@ -127,6 +127,11 @@ Options:
 
 Once running, open `http://localhost:8091` in your browser. The UI auto-refreshes every 2 seconds and shows all connected nodes. Click **Start Tests** to trigger execution, or continue using the terminal commands (`start` / `nodes`) as usual.
 
+**Authentication**: the web UI and `/api/*` endpoints require a bearer token.
+On startup the controller uses `STRESSTOOL_WEB_TOKEN` from the environment or
+generates a random token and prints it to the console. Sign in via `/login`
+(or send `Authorization: Bearer <token>` when scripting against the API).
+
 ![Controller Web UI](docs/controller-web-ui.png)
 
 ## Configuration

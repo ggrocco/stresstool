@@ -55,6 +55,12 @@ func NewEvaluator(cfg *config.Config) *Evaluator {
 	return e
 }
 
+// jsEvalTimeout caps how long a single {{ js(...) }} expression may run before
+// goja is interrupted. Placeholder evaluations should complete in microseconds;
+// anything longer is almost certainly a runaway script from a malicious or
+// malformed config.
+const jsEvalTimeout = 500 * time.Millisecond
+
 // runVM is the dedicated goroutine that owns the goja runtime.
 // All JS evaluations are serialised through this goroutine via evalChan.
 func (e *Evaluator) runVM(vm *goja.Runtime) {
@@ -63,7 +69,12 @@ func (e *Evaluator) runVM(vm *goja.Runtime) {
 		case <-e.stopChan:
 			return
 		case req := <-e.evalChan:
+			timer := time.AfterFunc(jsEvalTimeout, func() {
+				vm.Interrupt("stresstool: JS evaluation exceeded timeout")
+			})
 			value, err := vm.RunString(req.jsCode)
+			timer.Stop()
+			vm.ClearInterrupt()
 			if err != nil {
 				req.reply <- evalReply{err: fmt.Errorf("JS evaluation error: %w", err)}
 			} else {
