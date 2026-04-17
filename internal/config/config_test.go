@@ -234,7 +234,7 @@ func TestExecuteFunc(t *testing.T) {
 		start := time.Now()
 		f := &FuncDef{
 			Name: "sleep",
-			Cmd:  []string{"sleep", "35"},
+			Cmd:  []string{"sleep", "5"},
 		}
 		_, err := f.ExecuteFunc()
 		if err == nil {
@@ -243,8 +243,8 @@ func TestExecuteFunc(t *testing.T) {
 		if !strings.Contains(err.Error(), "timed out") {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if elapsed := time.Since(start); elapsed > 33*time.Second {
-			t.Fatalf("timeout should happen around 30s, took %s", elapsed)
+		if elapsed := time.Since(start); elapsed > 4*time.Second {
+			t.Fatalf("timeout should happen around 3s, took %s", elapsed)
 		}
 	})
 }

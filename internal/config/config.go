@@ -77,7 +77,7 @@ type FuncDef struct {
 	Cmd  []string `yaml:"cmd"`
 }
 
-const defaultFuncTimeout = 30 * time.Second
+const defaultFuncTimeout = 3 * time.Second
 
 // Test defines a single HTTP stress test
 type Test struct {
