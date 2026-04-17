@@ -273,6 +273,7 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultFuncTimeout)
 	defer cancel()
 
+	// #nosec G204 -- custom function commands are intentionally user-configured via YAML funcs.
 	cmd := exec.CommandContext(ctx, f.Cmd[0], f.Cmd[1:]...)
 	output, err := cmd.Output()
 	if err != nil {

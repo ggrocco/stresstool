@@ -228,7 +228,7 @@ func TestExecuteFunc(t *testing.T) {
 			t.Skip("skipping timeout test in short mode")
 		}
 		if runtime.GOOS == "windows" {
-			t.Skip("requires sh")
+			t.Skip("requires sleep command")
 		}
 
 		start := time.Now()
