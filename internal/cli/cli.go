@@ -140,23 +140,24 @@ func dryRunValidation(cfg *config.Config) error {
 	fmt.Printf("Tests defined: %d\n", len(cfg.Tests))
 	for i, test := range cfg.Tests {
 		fmt.Printf("\nTest %d: %s\n", i+1, test.Name)
-		fmt.Printf("  Path: %s\n", test.Path)
-		fmt.Printf("  Method: %s\n", test.Method)
 		fmt.Printf("  RPS: %d\n", test.RequestsPerSecond)
 		fmt.Printf("  Threads: %d\n", test.Threads)
 		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
 
-		if test.Assert != nil {
-			fmt.Printf("  Assertions:\n")
-			if test.Assert.StatusCode != 0 {
-				fmt.Printf("    - Status Code: %d\n", test.Assert.StatusCode)
+		if len(test.Steps) > 0 {
+			fmt.Printf("  Steps: %d\n", len(test.Steps))
+			for j, step := range test.Steps {
+				label := step.Name
+				if label == "" {
+					label = fmt.Sprintf("step-%d", j+1)
+				}
+				fmt.Printf("    %d. %s %s %s\n", j+1, label, step.Method, step.Path)
+				printAssertSummary(step.Assert, "       ")
 			}
-			if test.Assert.BodyContains != "" {
-				fmt.Printf("    - Body Contains: %s\n", test.Assert.BodyContains)
-			}
-			if test.Assert.MaxLatencyMs > 0 {
-				fmt.Printf("    - Max Latency: %dms\n", test.Assert.MaxLatencyMs)
-			}
+		} else {
+			fmt.Printf("  Path: %s\n", test.Path)
+			fmt.Printf("  Method: %s\n", test.Method)
+			printAssertSummary(test.Assert, "    ")
 		}
 	}
 
@@ -166,21 +167,13 @@ func dryRunValidation(cfg *config.Config) error {
 	fmt.Println("\n=== Placeholder Validation ===")
 
 	for _, test := range cfg.Tests {
-		// Check headers
-		for key, value := range test.Headers {
-			if strings.Contains(value, "{{") {
-				_, err := eval.Evaluate(value)
-				if err != nil {
-					return fmt.Errorf("invalid placeholder in header %s: %w", key, err)
-				}
-			}
+		if err := validateRequestPlaceholders(eval, test.Headers, test.Body, test.Name); err != nil {
+			return err
 		}
-
-		// Check body
-		if strings.Contains(test.Body, "{{") {
-			_, err := eval.Evaluate(test.Body)
-			if err != nil {
-				return fmt.Errorf("invalid placeholder in body: %w", err)
+		for j, step := range test.Steps {
+			scope := fmt.Sprintf("%s/step[%d]", test.Name, j)
+			if err := validateRequestPlaceholders(eval, step.Headers, step.Body, scope); err != nil {
+				return err
 			}
 		}
 	}
@@ -238,7 +231,18 @@ func printSummary(results []*runner.TestResult) {
 		metrics := result.Metrics
 
 		fmt.Printf("\nTest: %s\n", test.Name)
-		fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
+		if len(test.Steps) > 0 {
+			fmt.Printf("  Steps: %d (sequential per iteration)\n", len(test.Steps))
+			for j, step := range test.Steps {
+				label := step.Name
+				if label == "" {
+					label = fmt.Sprintf("step-%d", j+1)
+				}
+				fmt.Printf("    %d. %s %s %s\n", j+1, label, step.Method, step.Path)
+			}
+		} else {
+			fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
+		}
 		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
 		fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 			metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
@@ -284,8 +288,36 @@ func printSummary(results []*runner.TestResult) {
 		fmt.Printf("    P95: %s\n", p95.Round(time.Millisecond))
 		fmt.Printf("    P99: %s\n", p99.Round(time.Millisecond))
 
-		// Assertions
-		if test.Assert != nil {
+		// Assertions — per-step configs can't be aggregated meaningfully across
+		// all requests since each step may carry its own asserts, so for
+		// multi-step tests we only print the declared asserts and fall back to
+		// the overall passed/failed signal on the test as a whole.
+		if len(test.Steps) > 0 {
+			hasAnyAssert := false
+			for _, s := range test.Steps {
+				if s.Assert != nil {
+					hasAnyAssert = true
+					break
+				}
+			}
+			if hasAnyAssert {
+				fmt.Printf("  Assertions (per step):\n")
+				for j, step := range test.Steps {
+					if step.Assert == nil {
+						continue
+					}
+					label := step.Name
+					if label == "" {
+						label = fmt.Sprintf("step-%d", j+1)
+					}
+					fmt.Printf("    %s:\n", label)
+					printAssertSummary(step.Assert, "      ")
+				}
+				if metrics.AssertionFailures > 0 {
+					fmt.Printf("    Assertion failures recorded: %d\n", metrics.AssertionFailures)
+				}
+			}
+		} else if test.Assert != nil {
 			fmt.Printf("  Assertions:\n")
 			if test.Assert.StatusCode != 0 {
 				fmt.Printf("    Status Code %d: ", test.Assert.StatusCode)
@@ -336,4 +368,46 @@ func printSummary(results []*runner.TestResult) {
 		fmt.Println("OVERALL RESULT: ✗ SOME TESTS FAILED")
 	}
 	fmt.Println(strings.Repeat("=", 80))
+}
+
+// printAssertSummary writes a short human-readable description of an assertion
+// using the supplied indent prefix. A nil assertion prints nothing.
+func printAssertSummary(a *config.Assertion, indent string) {
+	if a == nil {
+		return
+	}
+	if a.StatusCode != 0 {
+		fmt.Printf("%s- Status Code: %d\n", indent, a.StatusCode)
+	}
+	if a.BodyContains != "" {
+		fmt.Printf("%s- Body Contains: %s\n", indent, a.BodyContains)
+	}
+	if a.BodyEquals != "" {
+		fmt.Printf("%s- Body Equals: %s\n", indent, a.BodyEquals)
+	}
+	if a.BodyNotEquals != "" {
+		fmt.Printf("%s- Body Not Equals: %s\n", indent, a.BodyNotEquals)
+	}
+	if a.MaxLatencyMs > 0 {
+		fmt.Printf("%s- Max Latency: %dms\n", indent, a.MaxLatencyMs)
+	}
+}
+
+// validateRequestPlaceholders evaluates every placeholder occurring in the
+// given headers map and body. scope is used to annotate error messages so
+// callers can tell the failure site apart (e.g. "test/step[2]").
+func validateRequestPlaceholders(eval *placeholders.Evaluator, headers map[string]string, body string, scope string) error {
+	for key, value := range headers {
+		if strings.Contains(value, "{{") {
+			if _, err := eval.Evaluate(value); err != nil {
+				return fmt.Errorf("invalid placeholder in %s header %s: %w", scope, key, err)
+			}
+		}
+	}
+	if strings.Contains(body, "{{") {
+		if _, err := eval.Evaluate(body); err != nil {
+			return fmt.Errorf("invalid placeholder in %s body: %w", scope, err)
+		}
+	}
+	return nil
 }

@@ -83,3 +83,47 @@ tests:
       status_code: 200
       max_latency_ms: 1000
 
+  # Multi-step test: each worker runs the steps sequentially, then loops.
+  # threads, requests_per_second and run_seconds apply to the whole test.
+  # requests_per_second gates individual step requests (5 rps with 3 steps
+  # means ~1.67 full iterations/sec, 5 HTTP requests/sec total).
+  # Per-step path/method/headers/body/assert replace the test-level fields,
+  # which cannot be combined with `steps`.
+  - name: api_checkout_flow
+    auth: false
+    requests_per_second: 5
+    threads: 2
+    run_seconds: 10
+
+    steps:
+      - name: list_products
+        path: "https://httpbin.org/get"
+        method: "GET"
+        headers:
+          X-Request-Id: "{{ uuid() }}"
+        assert:
+          status_code: 200
+          max_latency_ms: 1500
+
+      - name: create_cart
+        path: "https://httpbin.org/post"
+        method: "POST"
+        headers:
+          Content-Type: "application/json"
+        body: >
+          { "items": ["sku-1", "sku-2"], "ts": "{{ now() }}" }
+        assert:
+          status_code: 200
+          body_contains: "items"
+
+      - name: checkout
+        path: "https://httpbin.org/post"
+        method: "POST"
+        headers:
+          Content-Type: "application/json"
+        body: >
+          { "payment": "card", "ts": "{{ now() }}" }
+        assert:
+          status_code: 200
+          max_latency_ms: 2000
+

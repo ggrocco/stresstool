@@ -62,13 +62,7 @@ func testToProto(t *config.Test) *payloadpb.Test {
 		pb.Headers[k] = v
 	}
 	if t.Assert != nil {
-		pb.Assert = &payloadpb.Assertion{
-			StatusCode:    int32(t.Assert.StatusCode),
-			BodyContains:  t.Assert.BodyContains,
-			BodyEquals:    t.Assert.BodyEquals,
-			BodyNotEquals: t.Assert.BodyNotEquals,
-			MaxLatencyMs:  int32(t.Assert.MaxLatencyMs),
-		}
+		pb.Assert = assertionToProto(t.Assert)
 	}
 	if t.Auth != nil && !*t.Auth {
 		pb.AuthDisabled = true
@@ -79,7 +73,69 @@ func testToProto(t *config.Test) *payloadpb.Test {
 			Threads:           int32(n.Threads),
 		}
 	}
+	for i := range t.Steps {
+		pb.Steps = append(pb.Steps, stepToProto(&t.Steps[i]))
+	}
 	return pb
+}
+
+func assertionToProto(a *config.Assertion) *payloadpb.Assertion {
+	if a == nil {
+		return nil
+	}
+	return &payloadpb.Assertion{
+		StatusCode:    int32(a.StatusCode),
+		BodyContains:  a.BodyContains,
+		BodyEquals:    a.BodyEquals,
+		BodyNotEquals: a.BodyNotEquals,
+		MaxLatencyMs:  int32(a.MaxLatencyMs),
+	}
+}
+
+func assertionFromProto(pb *payloadpb.Assertion) *config.Assertion {
+	if pb == nil {
+		return nil
+	}
+	return &config.Assertion{
+		StatusCode:    int(pb.StatusCode),
+		BodyContains:  pb.BodyContains,
+		BodyEquals:    pb.BodyEquals,
+		BodyNotEquals: pb.BodyNotEquals,
+		MaxLatencyMs:  int(pb.MaxLatencyMs),
+	}
+}
+
+func stepToProto(s *config.Step) *payloadpb.Step {
+	if s == nil {
+		return nil
+	}
+	pb := &payloadpb.Step{
+		Name:    s.Name,
+		Path:    s.Path,
+		Method:  s.Method,
+		Headers: map[string]string{},
+		Body:    s.Body,
+		Assert:  assertionToProto(s.Assert),
+	}
+	for k, v := range s.Headers {
+		pb.Headers[k] = v
+	}
+	return pb
+}
+
+func stepFromProto(pb *payloadpb.Step) config.Step {
+	s := config.Step{
+		Name:    pb.Name,
+		Path:    pb.Path,
+		Method:  pb.Method,
+		Headers: map[string]string{},
+		Body:    pb.Body,
+		Assert:  assertionFromProto(pb.Assert),
+	}
+	for k, v := range pb.Headers {
+		s.Headers[k] = v
+	}
+	return s
 }
 
 // ConfigFromProto builds config.Config from protobuf.
@@ -132,15 +188,7 @@ func testFromProto(t *payloadpb.Test) (*config.Test, error) {
 	for k, v := range t.Headers {
 		out.Headers[k] = v
 	}
-	if t.Assert != nil {
-		out.Assert = &config.Assertion{
-			StatusCode:    int(t.Assert.StatusCode),
-			BodyContains:  t.Assert.BodyContains,
-			BodyEquals:    t.Assert.BodyEquals,
-			BodyNotEquals: t.Assert.BodyNotEquals,
-			MaxLatencyMs:  int(t.Assert.MaxLatencyMs),
-		}
-	}
+	out.Assert = assertionFromProto(t.Assert)
 	if t.AuthDisabled {
 		f := false
 		out.Auth = &f
@@ -153,6 +201,12 @@ func testFromProto(t *payloadpb.Test) (*config.Test, error) {
 			RequestsPerSecond: int(n.RequestsPerSecond),
 			Threads:           int(n.Threads),
 		}
+	}
+	for _, s := range t.Steps {
+		if s == nil {
+			continue
+		}
+		out.Steps = append(out.Steps, stepFromProto(s))
 	}
 	return out, nil
 }

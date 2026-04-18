@@ -1024,7 +1024,18 @@ func printTestResult(result *runner.TestResult) {
 	test := result.Test
 	metrics := result.Metrics
 
-	fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
+	if len(test.Steps) > 0 {
+		fmt.Printf("  Steps: %d (sequential per iteration)\n", len(test.Steps))
+		for j, step := range test.Steps {
+			label := step.Name
+			if label == "" {
+				label = fmt.Sprintf("step-%d", j+1)
+			}
+			fmt.Printf("    %d. %s %s %s\n", j+1, label, step.Method, step.Path)
+		}
+	} else {
+		fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
+	}
 	fmt.Printf("  Duration: %ds\n", test.RunSeconds)
 	fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 		metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)

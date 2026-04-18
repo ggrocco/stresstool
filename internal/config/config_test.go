@@ -269,3 +269,60 @@ tests:
 		t.Fatalf("validation failed: %v", err)
 	}
 }
+
+func TestValidateSteps_OK(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name:              "flow",
+			RequestsPerSecond: 1,
+			Threads:           1,
+			RunSeconds:        1,
+			Steps: []Step{
+				{Name: "s1", Path: "/a"},
+				{Name: "s2", Path: "/b", Method: "POST"},
+			},
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tests[0].Steps[0].Method != "GET" {
+		t.Fatalf("expected default method GET on step 0, got %q", cfg.Tests[0].Steps[0].Method)
+	}
+	if cfg.Tests[0].Steps[1].Method != "POST" {
+		t.Fatalf("expected POST preserved on step 1, got %q", cfg.Tests[0].Steps[1].Method)
+	}
+}
+
+func TestValidateSteps_MutualExclusion(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name:              "flow",
+			Path:              "/top",
+			RequestsPerSecond: 1,
+			Threads:           1,
+			RunSeconds:        1,
+			Steps:             []Step{{Path: "/a"}},
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "steps are defined") {
+		t.Fatalf("expected mutual-exclusion error, got %v", err)
+	}
+}
+
+func TestValidateSteps_PathRequired(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name:              "flow",
+			RequestsPerSecond: 1,
+			Threads:           1,
+			RunSeconds:        1,
+			Steps:             []Step{{Name: "missing"}},
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "path is required") {
+		t.Fatalf("expected step path error, got %v", err)
+	}
+}
