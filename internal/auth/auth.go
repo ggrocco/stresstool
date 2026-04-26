@@ -222,7 +222,7 @@ func (r *Resolver) fetchOAuth2Token(eval *placeholders.Evaluator) (token string,
 	if err != nil {
 		return "", 0, fmt.Errorf("token request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {

@@ -42,6 +42,9 @@ tests:
     requests_per_second: 5
     threads: 2
     run_seconds: 10
+    # Optional: linearly ramp requests_per_second from 0 → 5 over this many
+    # seconds before the main run begins. Total duration here = 3 + 10 = 13s.
+    warmup_seconds: 3
 
     # Auth headers (Authorization: Basic ...) are added automatically.
     headers:

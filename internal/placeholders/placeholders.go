@@ -13,8 +13,8 @@ import (
 
 // evalRequest is sent over the eval channel to the vm owner goroutine
 type evalRequest struct {
-	jsCode  string
-	reply   chan evalReply
+	jsCode string
+	reply  chan evalReply
 }
 
 // evalReply carries the result of a JS evaluation back to the caller
@@ -35,11 +35,11 @@ func NewEvaluator(cfg *config.Config) *Evaluator {
 	vm := goja.New()
 
 	// Register built-in functions
-	vm.Set("now", func() string {
+	_ = vm.Set("now", func() string {
 		return time.Now().UTC().Format(time.RFC3339)
 	})
 
-	vm.Set("uuid", func() string {
+	_ = vm.Set("uuid", func() string {
 		return uuid.New().String()
 	})
 

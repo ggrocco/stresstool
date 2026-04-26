@@ -164,6 +164,49 @@ func TestAuthType(t *testing.T) {
 	}
 }
 
+func TestValidateWarmupSecondsNegative(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Path: "/x", RequestsPerSecond: 1, Threads: 1, RunSeconds: 1, WarmupSeconds: -1,
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for negative warmup_seconds")
+	}
+	if !strings.Contains(err.Error(), "warmup_seconds") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWithNodeOverrides_Warmup(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name: "t", Path: "/x", RequestsPerSecond: 10, Threads: 2,
+			RunSeconds: 10, WarmupSeconds: 5,
+			Nodes: map[string]Node{
+				"override":    {WarmupSeconds: 15},
+				"disable":     {WarmupSeconds: -1},
+				"inherit":     {Threads: 4},
+				"disable-rps": {RequestsPerSecond: 20, WarmupSeconds: -1},
+			},
+		}},
+	}
+
+	cases := map[string]int{
+		"override":    15,
+		"disable":     0,
+		"inherit":     5,
+		"disable-rps": 0,
+	}
+	for node, want := range cases {
+		out := cfg.WithNodeOverrides(node)
+		if got := out.Tests[0].WarmupSeconds; got != want {
+			t.Errorf("node %q: WarmupSeconds = %d, want %d", node, got, want)
+		}
+	}
+}
+
 func TestParseYAMLAuth(t *testing.T) {
 	yaml := `
 auth:

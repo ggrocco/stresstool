@@ -105,7 +105,7 @@ var controllerCmd = &cobra.Command{
 func init() {
 	// Run command (standalone mode)
 	runCmd.Flags().StringVarP(&configFile, "file", "f", "", "Path to YAML configuration file (required)")
-	runCmd.MarkFlagRequired("file")
+	_ = runCmd.MarkFlagRequired("file")
 	runCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
 	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate config and show planned tests without executing HTTP calls")
 	runCmd.Flags().BoolVar(&parallel, "parallel", false, "Run all specs in parallel")
@@ -113,9 +113,9 @@ func init() {
 
 	// Node command (worker)
 	nodeCmd.Flags().StringVar(&nodeName, "node-name", "", "Name of this node (required)")
-	nodeCmd.MarkFlagRequired("node-name")
+	_ = nodeCmd.MarkFlagRequired("node-name")
 	nodeCmd.Flags().StringVar(&controllerAddr, "controller", "", "Controller address (host:port) to connect to (required)")
-	nodeCmd.MarkFlagRequired("controller")
+	_ = nodeCmd.MarkFlagRequired("controller")
 	nodeCmd.Flags().BoolVar(&verbose, "verbose", false, "Print detailed logs")
 	rootCmd.AddCommand(nodeCmd)
 

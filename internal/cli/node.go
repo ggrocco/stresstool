@@ -53,7 +53,7 @@ func RunNode(nodeName, controllerAddr string, verbose bool, tlsOpts TLSOptions) 
 	if err != nil {
 		return fmt.Errorf("connect to controller at %s: %w", controllerAddr, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := payloadpb.NewStressTestServiceClient(conn)
 	stream, err := client.Session(context.Background())
@@ -179,8 +179,13 @@ func (n *grpcWorker) handleTestSpec(spec *payloadpb.TestSpecMessage) {
 
 	fmt.Printf("Received test specification with %d test(s)\n", len(n.config.Tests))
 	for _, test := range n.config.Tests {
-		fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",
-			test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+		if test.WarmupSeconds > 0 {
+			fmt.Printf("  - %s: %d RPS, %d threads, %ds duration (+%ds warmup)\n",
+				test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds, test.WarmupSeconds)
+		} else {
+			fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",
+				test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+		}
 	}
 
 	if err := n.send(&payloadpb.NodeMessage{
