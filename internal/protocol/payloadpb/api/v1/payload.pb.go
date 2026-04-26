@@ -375,6 +375,7 @@ type AuthConfig struct {
 	Bearer                  *BearerAuthConfig              `protobuf:"bytes,2,opt,name=bearer,proto3" json:"bearer,omitempty"`
 	ApiKey                  *APIKeyAuthConfig              `protobuf:"bytes,3,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
 	Oauth2ClientCredentials *OAuth2ClientCredentialsConfig `protobuf:"bytes,4,opt,name=oauth2_client_credentials,json=oauth2ClientCredentials,proto3" json:"oauth2_client_credentials,omitempty"`
+	Jwt                     *JWTAuthConfig                 `protobuf:"bytes,5,opt,name=jwt,proto3" json:"jwt,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -437,6 +438,128 @@ func (x *AuthConfig) GetOauth2ClientCredentials() *OAuth2ClientCredentialsConfig
 	return nil
 }
 
+func (x *AuthConfig) GetJwt() *JWTAuthConfig {
+	if x != nil {
+		return x.Jwt
+	}
+	return nil
+}
+
+// JWTAuthConfig carries JSON Web Token auth configuration. Header and payload
+// are flat string key/value maps; numeric claims are coerced when the token
+// is built.
+type JWTAuthConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Header        map[string]string      `protobuf:"bytes,1,rep,name=header,proto3" json:"header,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Payload       map[string]string      `protobuf:"bytes,2,rep,name=payload,proto3" json:"payload,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Signature     *JWTSignatureConfig    `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	TtlSeconds    int32                  `protobuf:"varint,4,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JWTAuthConfig) Reset() {
+	*x = JWTAuthConfig{}
+	mi := &file_api_v1_payload_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JWTAuthConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JWTAuthConfig) ProtoMessage() {}
+
+func (x *JWTAuthConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_payload_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JWTAuthConfig.ProtoReflect.Descriptor instead.
+func (*JWTAuthConfig) Descriptor() ([]byte, []int) {
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *JWTAuthConfig) GetHeader() map[string]string {
+	if x != nil {
+		return x.Header
+	}
+	return nil
+}
+
+func (x *JWTAuthConfig) GetPayload() map[string]string {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *JWTAuthConfig) GetSignature() *JWTSignatureConfig {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+func (x *JWTAuthConfig) GetTtlSeconds() int32 {
+	if x != nil {
+		return x.TtlSeconds
+	}
+	return 0
+}
+
+type JWTSignatureConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Secret        string                 `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JWTSignatureConfig) Reset() {
+	*x = JWTSignatureConfig{}
+	mi := &file_api_v1_payload_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JWTSignatureConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JWTSignatureConfig) ProtoMessage() {}
+
+func (x *JWTSignatureConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_payload_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JWTSignatureConfig.ProtoReflect.Descriptor instead.
+func (*JWTSignatureConfig) Descriptor() ([]byte, []int) {
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *JWTSignatureConfig) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
 type BasicAuthConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
@@ -447,7 +570,7 @@ type BasicAuthConfig struct {
 
 func (x *BasicAuthConfig) Reset() {
 	*x = BasicAuthConfig{}
-	mi := &file_api_v1_payload_proto_msgTypes[5]
+	mi := &file_api_v1_payload_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -459,7 +582,7 @@ func (x *BasicAuthConfig) String() string {
 func (*BasicAuthConfig) ProtoMessage() {}
 
 func (x *BasicAuthConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[5]
+	mi := &file_api_v1_payload_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -472,7 +595,7 @@ func (x *BasicAuthConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BasicAuthConfig.ProtoReflect.Descriptor instead.
 func (*BasicAuthConfig) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{5}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BasicAuthConfig) GetUsername() string {
@@ -498,7 +621,7 @@ type BearerAuthConfig struct {
 
 func (x *BearerAuthConfig) Reset() {
 	*x = BearerAuthConfig{}
-	mi := &file_api_v1_payload_proto_msgTypes[6]
+	mi := &file_api_v1_payload_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -510,7 +633,7 @@ func (x *BearerAuthConfig) String() string {
 func (*BearerAuthConfig) ProtoMessage() {}
 
 func (x *BearerAuthConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[6]
+	mi := &file_api_v1_payload_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -523,7 +646,7 @@ func (x *BearerAuthConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BearerAuthConfig.ProtoReflect.Descriptor instead.
 func (*BearerAuthConfig) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{6}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *BearerAuthConfig) GetToken() string {
@@ -543,7 +666,7 @@ type APIKeyAuthConfig struct {
 
 func (x *APIKeyAuthConfig) Reset() {
 	*x = APIKeyAuthConfig{}
-	mi := &file_api_v1_payload_proto_msgTypes[7]
+	mi := &file_api_v1_payload_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -555,7 +678,7 @@ func (x *APIKeyAuthConfig) String() string {
 func (*APIKeyAuthConfig) ProtoMessage() {}
 
 func (x *APIKeyAuthConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[7]
+	mi := &file_api_v1_payload_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -568,7 +691,7 @@ func (x *APIKeyAuthConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use APIKeyAuthConfig.ProtoReflect.Descriptor instead.
 func (*APIKeyAuthConfig) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{7}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *APIKeyAuthConfig) GetHeader() string {
@@ -597,7 +720,7 @@ type OAuth2ClientCredentialsConfig struct {
 
 func (x *OAuth2ClientCredentialsConfig) Reset() {
 	*x = OAuth2ClientCredentialsConfig{}
-	mi := &file_api_v1_payload_proto_msgTypes[8]
+	mi := &file_api_v1_payload_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +732,7 @@ func (x *OAuth2ClientCredentialsConfig) String() string {
 func (*OAuth2ClientCredentialsConfig) ProtoMessage() {}
 
 func (x *OAuth2ClientCredentialsConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[8]
+	mi := &file_api_v1_payload_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +745,7 @@ func (x *OAuth2ClientCredentialsConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OAuth2ClientCredentialsConfig.ProtoReflect.Descriptor instead.
 func (*OAuth2ClientCredentialsConfig) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{8}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *OAuth2ClientCredentialsConfig) GetTokenUrl() string {
@@ -663,7 +786,7 @@ type FuncDef struct {
 
 func (x *FuncDef) Reset() {
 	*x = FuncDef{}
-	mi := &file_api_v1_payload_proto_msgTypes[9]
+	mi := &file_api_v1_payload_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -675,7 +798,7 @@ func (x *FuncDef) String() string {
 func (*FuncDef) ProtoMessage() {}
 
 func (x *FuncDef) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[9]
+	mi := &file_api_v1_payload_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -688,7 +811,7 @@ func (x *FuncDef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FuncDef.ProtoReflect.Descriptor instead.
 func (*FuncDef) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{9}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FuncDef) GetName() string {
@@ -724,7 +847,7 @@ type Test struct {
 
 func (x *Test) Reset() {
 	*x = Test{}
-	mi := &file_api_v1_payload_proto_msgTypes[10]
+	mi := &file_api_v1_payload_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -736,7 +859,7 @@ func (x *Test) String() string {
 func (*Test) ProtoMessage() {}
 
 func (x *Test) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[10]
+	mi := &file_api_v1_payload_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -749,7 +872,7 @@ func (x *Test) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Test.ProtoReflect.Descriptor instead.
 func (*Test) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{10}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Test) GetName() string {
@@ -839,7 +962,7 @@ type NodeOverride struct {
 
 func (x *NodeOverride) Reset() {
 	*x = NodeOverride{}
-	mi := &file_api_v1_payload_proto_msgTypes[11]
+	mi := &file_api_v1_payload_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -851,7 +974,7 @@ func (x *NodeOverride) String() string {
 func (*NodeOverride) ProtoMessage() {}
 
 func (x *NodeOverride) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[11]
+	mi := &file_api_v1_payload_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -864,7 +987,7 @@ func (x *NodeOverride) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeOverride.ProtoReflect.Descriptor instead.
 func (*NodeOverride) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{11}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NodeOverride) GetRequestsPerSecond() int32 {
@@ -894,7 +1017,7 @@ type Assertion struct {
 
 func (x *Assertion) Reset() {
 	*x = Assertion{}
-	mi := &file_api_v1_payload_proto_msgTypes[12]
+	mi := &file_api_v1_payload_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -906,7 +1029,7 @@ func (x *Assertion) String() string {
 func (*Assertion) ProtoMessage() {}
 
 func (x *Assertion) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[12]
+	mi := &file_api_v1_payload_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -919,7 +1042,7 @@ func (x *Assertion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Assertion.ProtoReflect.Descriptor instead.
 func (*Assertion) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{12}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Assertion) GetStatusCode() int32 {
@@ -967,7 +1090,7 @@ type HelloMessage struct {
 
 func (x *HelloMessage) Reset() {
 	*x = HelloMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[13]
+	mi := &file_api_v1_payload_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -979,7 +1102,7 @@ func (x *HelloMessage) String() string {
 func (*HelloMessage) ProtoMessage() {}
 
 func (x *HelloMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[13]
+	mi := &file_api_v1_payload_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -992,7 +1115,7 @@ func (x *HelloMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloMessage.ProtoReflect.Descriptor instead.
 func (*HelloMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{13}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HelloMessage) GetNodeName() string {
@@ -1020,7 +1143,7 @@ type TestSpecMessage struct {
 
 func (x *TestSpecMessage) Reset() {
 	*x = TestSpecMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[14]
+	mi := &file_api_v1_payload_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1032,7 +1155,7 @@ func (x *TestSpecMessage) String() string {
 func (*TestSpecMessage) ProtoMessage() {}
 
 func (x *TestSpecMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[14]
+	mi := &file_api_v1_payload_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1045,7 +1168,7 @@ func (x *TestSpecMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSpecMessage.ProtoReflect.Descriptor instead.
 func (*TestSpecMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{14}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TestSpecMessage) GetConfig() *Config {
@@ -1084,7 +1207,7 @@ type ProgressMessage struct {
 
 func (x *ProgressMessage) Reset() {
 	*x = ProgressMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[15]
+	mi := &file_api_v1_payload_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1096,7 +1219,7 @@ func (x *ProgressMessage) String() string {
 func (*ProgressMessage) ProtoMessage() {}
 
 func (x *ProgressMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[15]
+	mi := &file_api_v1_payload_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1109,7 +1232,7 @@ func (x *ProgressMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProgressMessage.ProtoReflect.Descriptor instead.
 func (*ProgressMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{15}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ProgressMessage) GetNodeName() string {
@@ -1172,7 +1295,7 @@ type TestResultMessage struct {
 
 func (x *TestResultMessage) Reset() {
 	*x = TestResultMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[16]
+	mi := &file_api_v1_payload_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1184,7 +1307,7 @@ func (x *TestResultMessage) String() string {
 func (*TestResultMessage) ProtoMessage() {}
 
 func (x *TestResultMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[16]
+	mi := &file_api_v1_payload_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1197,7 +1320,7 @@ func (x *TestResultMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestResultMessage.ProtoReflect.Descriptor instead.
 func (*TestResultMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{16}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TestResultMessage) GetNodeName() string {
@@ -1235,7 +1358,7 @@ type TestResult struct {
 
 func (x *TestResult) Reset() {
 	*x = TestResult{}
-	mi := &file_api_v1_payload_proto_msgTypes[17]
+	mi := &file_api_v1_payload_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1247,7 +1370,7 @@ func (x *TestResult) String() string {
 func (*TestResult) ProtoMessage() {}
 
 func (x *TestResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[17]
+	mi := &file_api_v1_payload_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1260,7 +1383,7 @@ func (x *TestResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestResult.ProtoReflect.Descriptor instead.
 func (*TestResult) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{17}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TestResult) GetTest() *Test {
@@ -1313,7 +1436,7 @@ type Assertions struct {
 
 func (x *Assertions) Reset() {
 	*x = Assertions{}
-	mi := &file_api_v1_payload_proto_msgTypes[18]
+	mi := &file_api_v1_payload_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1325,7 +1448,7 @@ func (x *Assertions) String() string {
 func (*Assertions) ProtoMessage() {}
 
 func (x *Assertions) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[18]
+	mi := &file_api_v1_payload_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1338,7 +1461,7 @@ func (x *Assertions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Assertions.ProtoReflect.Descriptor instead.
 func (*Assertions) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{18}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{20}
 }
 
 type Metrics struct {
@@ -1356,7 +1479,7 @@ type Metrics struct {
 
 func (x *Metrics) Reset() {
 	*x = Metrics{}
-	mi := &file_api_v1_payload_proto_msgTypes[19]
+	mi := &file_api_v1_payload_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1368,7 +1491,7 @@ func (x *Metrics) String() string {
 func (*Metrics) ProtoMessage() {}
 
 func (x *Metrics) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[19]
+	mi := &file_api_v1_payload_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1381,7 +1504,7 @@ func (x *Metrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metrics.ProtoReflect.Descriptor instead.
 func (*Metrics) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{19}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *Metrics) GetTotalRequests() int64 {
@@ -1442,7 +1565,7 @@ type ReadyMessage struct {
 
 func (x *ReadyMessage) Reset() {
 	*x = ReadyMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[20]
+	mi := &file_api_v1_payload_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1454,7 +1577,7 @@ func (x *ReadyMessage) String() string {
 func (*ReadyMessage) ProtoMessage() {}
 
 func (x *ReadyMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[20]
+	mi := &file_api_v1_payload_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1467,7 +1590,7 @@ func (x *ReadyMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadyMessage.ProtoReflect.Descriptor instead.
 func (*ReadyMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{20}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReadyMessage) GetNodeName() string {
@@ -1486,7 +1609,7 @@ type StartTestsMessage struct {
 
 func (x *StartTestsMessage) Reset() {
 	*x = StartTestsMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[21]
+	mi := &file_api_v1_payload_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1498,7 +1621,7 @@ func (x *StartTestsMessage) String() string {
 func (*StartTestsMessage) ProtoMessage() {}
 
 func (x *StartTestsMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[21]
+	mi := &file_api_v1_payload_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1511,7 +1634,7 @@ func (x *StartTestsMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTestsMessage.ProtoReflect.Descriptor instead.
 func (*StartTestsMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{21}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StartTestsMessage) GetTimestamp() int64 {
@@ -1532,7 +1655,7 @@ type ErrorMessage struct {
 
 func (x *ErrorMessage) Reset() {
 	*x = ErrorMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[22]
+	mi := &file_api_v1_payload_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1544,7 +1667,7 @@ func (x *ErrorMessage) String() string {
 func (*ErrorMessage) ProtoMessage() {}
 
 func (x *ErrorMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[22]
+	mi := &file_api_v1_payload_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1557,7 +1680,7 @@ func (x *ErrorMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorMessage.ProtoReflect.Descriptor instead.
 func (*ErrorMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{22}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ErrorMessage) GetNodeName() string {
@@ -1589,7 +1712,7 @@ type CompleteMessage struct {
 
 func (x *CompleteMessage) Reset() {
 	*x = CompleteMessage{}
-	mi := &file_api_v1_payload_proto_msgTypes[23]
+	mi := &file_api_v1_payload_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1601,7 +1724,7 @@ func (x *CompleteMessage) String() string {
 func (*CompleteMessage) ProtoMessage() {}
 
 func (x *CompleteMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_payload_proto_msgTypes[23]
+	mi := &file_api_v1_payload_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1614,7 +1737,7 @@ func (x *CompleteMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompleteMessage.ProtoReflect.Descriptor instead.
 func (*CompleteMessage) Descriptor() ([]byte, []int) {
-	return file_api_v1_payload_proto_rawDescGZIP(), []int{23}
+	return file_api_v1_payload_proto_rawDescGZIP(), []int{25}
 }
 
 var File_api_v1_payload_proto protoreflect.FileDescriptor
@@ -1643,14 +1766,29 @@ const file_api_v1_payload_proto_rawDesc = "" +
 	"\x06Config\x12,\n" +
 	"\x05funcs\x18\x01 \x03(\v2\x16.stresstool.v1.FuncDefR\x05funcs\x12)\n" +
 	"\x05tests\x18\x02 \x03(\v2\x13.stresstool.v1.TestR\x05tests\x12-\n" +
-	"\x04auth\x18\x03 \x01(\v2\x19.stresstool.v1.AuthConfigR\x04auth\"\xa8\x02\n" +
+	"\x04auth\x18\x03 \x01(\v2\x19.stresstool.v1.AuthConfigR\x04auth\"\xd8\x02\n" +
 	"\n" +
 	"AuthConfig\x12=\n" +
 	"\n" +
 	"basic_auth\x18\x01 \x01(\v2\x1e.stresstool.v1.BasicAuthConfigR\tbasicAuth\x127\n" +
 	"\x06bearer\x18\x02 \x01(\v2\x1f.stresstool.v1.BearerAuthConfigR\x06bearer\x128\n" +
 	"\aapi_key\x18\x03 \x01(\v2\x1f.stresstool.v1.APIKeyAuthConfigR\x06apiKey\x12h\n" +
-	"\x19oauth2_client_credentials\x18\x04 \x01(\v2,.stresstool.v1.OAuth2ClientCredentialsConfigR\x17oauth2ClientCredentials\"I\n" +
+	"\x19oauth2_client_credentials\x18\x04 \x01(\v2,.stresstool.v1.OAuth2ClientCredentialsConfigR\x17oauth2ClientCredentials\x12.\n" +
+	"\x03jwt\x18\x05 \x01(\v2\x1c.stresstool.v1.JWTAuthConfigR\x03jwt\"\xef\x02\n" +
+	"\rJWTAuthConfig\x12@\n" +
+	"\x06header\x18\x01 \x03(\v2(.stresstool.v1.JWTAuthConfig.HeaderEntryR\x06header\x12C\n" +
+	"\apayload\x18\x02 \x03(\v2).stresstool.v1.JWTAuthConfig.PayloadEntryR\apayload\x12?\n" +
+	"\tsignature\x18\x03 \x01(\v2!.stresstool.v1.JWTSignatureConfigR\tsignature\x12\x1f\n" +
+	"\vttl_seconds\x18\x04 \x01(\x05R\n" +
+	"ttlSeconds\x1a9\n" +
+	"\vHeaderEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a:\n" +
+	"\fPayloadEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\",\n" +
+	"\x12JWTSignatureConfig\x12\x16\n" +
+	"\x06secret\x18\x01 \x01(\tR\x06secret\"I\n" +
 	"\x0fBasicAuthConfig\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"(\n" +
@@ -1768,72 +1906,80 @@ func file_api_v1_payload_proto_rawDescGZIP() []byte {
 	return file_api_v1_payload_proto_rawDescData
 }
 
-var file_api_v1_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_api_v1_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_api_v1_payload_proto_goTypes = []any{
 	(*NodeMessage)(nil),                   // 0: stresstool.v1.NodeMessage
 	(*ControllerMessage)(nil),             // 1: stresstool.v1.ControllerMessage
 	(*StopTestsMessage)(nil),              // 2: stresstool.v1.StopTestsMessage
 	(*Config)(nil),                        // 3: stresstool.v1.Config
 	(*AuthConfig)(nil),                    // 4: stresstool.v1.AuthConfig
-	(*BasicAuthConfig)(nil),               // 5: stresstool.v1.BasicAuthConfig
-	(*BearerAuthConfig)(nil),              // 6: stresstool.v1.BearerAuthConfig
-	(*APIKeyAuthConfig)(nil),              // 7: stresstool.v1.APIKeyAuthConfig
-	(*OAuth2ClientCredentialsConfig)(nil), // 8: stresstool.v1.OAuth2ClientCredentialsConfig
-	(*FuncDef)(nil),                       // 9: stresstool.v1.FuncDef
-	(*Test)(nil),                          // 10: stresstool.v1.Test
-	(*NodeOverride)(nil),                  // 11: stresstool.v1.NodeOverride
-	(*Assertion)(nil),                     // 12: stresstool.v1.Assertion
-	(*HelloMessage)(nil),                  // 13: stresstool.v1.HelloMessage
-	(*TestSpecMessage)(nil),               // 14: stresstool.v1.TestSpecMessage
-	(*ProgressMessage)(nil),               // 15: stresstool.v1.ProgressMessage
-	(*TestResultMessage)(nil),             // 16: stresstool.v1.TestResultMessage
-	(*TestResult)(nil),                    // 17: stresstool.v1.TestResult
-	(*Assertions)(nil),                    // 18: stresstool.v1.Assertions
-	(*Metrics)(nil),                       // 19: stresstool.v1.Metrics
-	(*ReadyMessage)(nil),                  // 20: stresstool.v1.ReadyMessage
-	(*StartTestsMessage)(nil),             // 21: stresstool.v1.StartTestsMessage
-	(*ErrorMessage)(nil),                  // 22: stresstool.v1.ErrorMessage
-	(*CompleteMessage)(nil),               // 23: stresstool.v1.CompleteMessage
-	nil,                                   // 24: stresstool.v1.Test.HeadersEntry
-	nil,                                   // 25: stresstool.v1.Test.NodesEntry
-	nil,                                   // 26: stresstool.v1.Metrics.StatusCodesEntry
-	nil,                                   // 27: stresstool.v1.Metrics.ErrorsEntry
+	(*JWTAuthConfig)(nil),                 // 5: stresstool.v1.JWTAuthConfig
+	(*JWTSignatureConfig)(nil),            // 6: stresstool.v1.JWTSignatureConfig
+	(*BasicAuthConfig)(nil),               // 7: stresstool.v1.BasicAuthConfig
+	(*BearerAuthConfig)(nil),              // 8: stresstool.v1.BearerAuthConfig
+	(*APIKeyAuthConfig)(nil),              // 9: stresstool.v1.APIKeyAuthConfig
+	(*OAuth2ClientCredentialsConfig)(nil), // 10: stresstool.v1.OAuth2ClientCredentialsConfig
+	(*FuncDef)(nil),                       // 11: stresstool.v1.FuncDef
+	(*Test)(nil),                          // 12: stresstool.v1.Test
+	(*NodeOverride)(nil),                  // 13: stresstool.v1.NodeOverride
+	(*Assertion)(nil),                     // 14: stresstool.v1.Assertion
+	(*HelloMessage)(nil),                  // 15: stresstool.v1.HelloMessage
+	(*TestSpecMessage)(nil),               // 16: stresstool.v1.TestSpecMessage
+	(*ProgressMessage)(nil),               // 17: stresstool.v1.ProgressMessage
+	(*TestResultMessage)(nil),             // 18: stresstool.v1.TestResultMessage
+	(*TestResult)(nil),                    // 19: stresstool.v1.TestResult
+	(*Assertions)(nil),                    // 20: stresstool.v1.Assertions
+	(*Metrics)(nil),                       // 21: stresstool.v1.Metrics
+	(*ReadyMessage)(nil),                  // 22: stresstool.v1.ReadyMessage
+	(*StartTestsMessage)(nil),             // 23: stresstool.v1.StartTestsMessage
+	(*ErrorMessage)(nil),                  // 24: stresstool.v1.ErrorMessage
+	(*CompleteMessage)(nil),               // 25: stresstool.v1.CompleteMessage
+	nil,                                   // 26: stresstool.v1.JWTAuthConfig.HeaderEntry
+	nil,                                   // 27: stresstool.v1.JWTAuthConfig.PayloadEntry
+	nil,                                   // 28: stresstool.v1.Test.HeadersEntry
+	nil,                                   // 29: stresstool.v1.Test.NodesEntry
+	nil,                                   // 30: stresstool.v1.Metrics.StatusCodesEntry
+	nil,                                   // 31: stresstool.v1.Metrics.ErrorsEntry
 }
 var file_api_v1_payload_proto_depIdxs = []int32{
-	13, // 0: stresstool.v1.NodeMessage.hello:type_name -> stresstool.v1.HelloMessage
-	20, // 1: stresstool.v1.NodeMessage.ready:type_name -> stresstool.v1.ReadyMessage
-	15, // 2: stresstool.v1.NodeMessage.progress:type_name -> stresstool.v1.ProgressMessage
-	16, // 3: stresstool.v1.NodeMessage.test_result:type_name -> stresstool.v1.TestResultMessage
-	22, // 4: stresstool.v1.NodeMessage.error:type_name -> stresstool.v1.ErrorMessage
-	14, // 5: stresstool.v1.ControllerMessage.test_spec:type_name -> stresstool.v1.TestSpecMessage
-	21, // 6: stresstool.v1.ControllerMessage.start_tests:type_name -> stresstool.v1.StartTestsMessage
-	23, // 7: stresstool.v1.ControllerMessage.complete:type_name -> stresstool.v1.CompleteMessage
+	15, // 0: stresstool.v1.NodeMessage.hello:type_name -> stresstool.v1.HelloMessage
+	22, // 1: stresstool.v1.NodeMessage.ready:type_name -> stresstool.v1.ReadyMessage
+	17, // 2: stresstool.v1.NodeMessage.progress:type_name -> stresstool.v1.ProgressMessage
+	18, // 3: stresstool.v1.NodeMessage.test_result:type_name -> stresstool.v1.TestResultMessage
+	24, // 4: stresstool.v1.NodeMessage.error:type_name -> stresstool.v1.ErrorMessage
+	16, // 5: stresstool.v1.ControllerMessage.test_spec:type_name -> stresstool.v1.TestSpecMessage
+	23, // 6: stresstool.v1.ControllerMessage.start_tests:type_name -> stresstool.v1.StartTestsMessage
+	25, // 7: stresstool.v1.ControllerMessage.complete:type_name -> stresstool.v1.CompleteMessage
 	2,  // 8: stresstool.v1.ControllerMessage.stop_tests:type_name -> stresstool.v1.StopTestsMessage
-	9,  // 9: stresstool.v1.Config.funcs:type_name -> stresstool.v1.FuncDef
-	10, // 10: stresstool.v1.Config.tests:type_name -> stresstool.v1.Test
+	11, // 9: stresstool.v1.Config.funcs:type_name -> stresstool.v1.FuncDef
+	12, // 10: stresstool.v1.Config.tests:type_name -> stresstool.v1.Test
 	4,  // 11: stresstool.v1.Config.auth:type_name -> stresstool.v1.AuthConfig
-	5,  // 12: stresstool.v1.AuthConfig.basic_auth:type_name -> stresstool.v1.BasicAuthConfig
-	6,  // 13: stresstool.v1.AuthConfig.bearer:type_name -> stresstool.v1.BearerAuthConfig
-	7,  // 14: stresstool.v1.AuthConfig.api_key:type_name -> stresstool.v1.APIKeyAuthConfig
-	8,  // 15: stresstool.v1.AuthConfig.oauth2_client_credentials:type_name -> stresstool.v1.OAuth2ClientCredentialsConfig
-	24, // 16: stresstool.v1.Test.headers:type_name -> stresstool.v1.Test.HeadersEntry
-	12, // 17: stresstool.v1.Test.assert:type_name -> stresstool.v1.Assertion
-	25, // 18: stresstool.v1.Test.nodes:type_name -> stresstool.v1.Test.NodesEntry
-	3,  // 19: stresstool.v1.TestSpecMessage.config:type_name -> stresstool.v1.Config
-	17, // 20: stresstool.v1.TestResultMessage.result:type_name -> stresstool.v1.TestResult
-	10, // 21: stresstool.v1.TestResult.test:type_name -> stresstool.v1.Test
-	19, // 22: stresstool.v1.TestResult.metrics:type_name -> stresstool.v1.Metrics
-	18, // 23: stresstool.v1.TestResult.assertions:type_name -> stresstool.v1.Assertions
-	26, // 24: stresstool.v1.Metrics.status_codes:type_name -> stresstool.v1.Metrics.StatusCodesEntry
-	27, // 25: stresstool.v1.Metrics.errors:type_name -> stresstool.v1.Metrics.ErrorsEntry
-	11, // 26: stresstool.v1.Test.NodesEntry.value:type_name -> stresstool.v1.NodeOverride
-	0,  // 27: stresstool.v1.StressTestService.Session:input_type -> stresstool.v1.NodeMessage
-	1,  // 28: stresstool.v1.StressTestService.Session:output_type -> stresstool.v1.ControllerMessage
-	28, // [28:29] is the sub-list for method output_type
-	27, // [27:28] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	7,  // 12: stresstool.v1.AuthConfig.basic_auth:type_name -> stresstool.v1.BasicAuthConfig
+	8,  // 13: stresstool.v1.AuthConfig.bearer:type_name -> stresstool.v1.BearerAuthConfig
+	9,  // 14: stresstool.v1.AuthConfig.api_key:type_name -> stresstool.v1.APIKeyAuthConfig
+	10, // 15: stresstool.v1.AuthConfig.oauth2_client_credentials:type_name -> stresstool.v1.OAuth2ClientCredentialsConfig
+	5,  // 16: stresstool.v1.AuthConfig.jwt:type_name -> stresstool.v1.JWTAuthConfig
+	26, // 17: stresstool.v1.JWTAuthConfig.header:type_name -> stresstool.v1.JWTAuthConfig.HeaderEntry
+	27, // 18: stresstool.v1.JWTAuthConfig.payload:type_name -> stresstool.v1.JWTAuthConfig.PayloadEntry
+	6,  // 19: stresstool.v1.JWTAuthConfig.signature:type_name -> stresstool.v1.JWTSignatureConfig
+	28, // 20: stresstool.v1.Test.headers:type_name -> stresstool.v1.Test.HeadersEntry
+	14, // 21: stresstool.v1.Test.assert:type_name -> stresstool.v1.Assertion
+	29, // 22: stresstool.v1.Test.nodes:type_name -> stresstool.v1.Test.NodesEntry
+	3,  // 23: stresstool.v1.TestSpecMessage.config:type_name -> stresstool.v1.Config
+	19, // 24: stresstool.v1.TestResultMessage.result:type_name -> stresstool.v1.TestResult
+	12, // 25: stresstool.v1.TestResult.test:type_name -> stresstool.v1.Test
+	21, // 26: stresstool.v1.TestResult.metrics:type_name -> stresstool.v1.Metrics
+	20, // 27: stresstool.v1.TestResult.assertions:type_name -> stresstool.v1.Assertions
+	30, // 28: stresstool.v1.Metrics.status_codes:type_name -> stresstool.v1.Metrics.StatusCodesEntry
+	31, // 29: stresstool.v1.Metrics.errors:type_name -> stresstool.v1.Metrics.ErrorsEntry
+	13, // 30: stresstool.v1.Test.NodesEntry.value:type_name -> stresstool.v1.NodeOverride
+	0,  // 31: stresstool.v1.StressTestService.Session:input_type -> stresstool.v1.NodeMessage
+	1,  // 32: stresstool.v1.StressTestService.Session:output_type -> stresstool.v1.ControllerMessage
+	32, // [32:33] is the sub-list for method output_type
+	31, // [31:32] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_payload_proto_init() }
@@ -1860,7 +2006,7 @@ func file_api_v1_payload_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_payload_proto_rawDesc), len(file_api_v1_payload_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

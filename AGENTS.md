@@ -85,7 +85,7 @@ terraform/{aws,gcp,azure}/      -- cloud deployment configs
 ## Configuration
 
 YAML-based (see `example-config.yaml`). Key features:
-- `auth`: hash keyed by auth type -- only one type per config. Supported: `basic_auth`, `bearer`, `api_key`, `oauth2_client_credentials`. All tests use it automatically; individual tests opt out with `auth: false`. Values support `{{ }}` placeholders.
+- `auth`: hash keyed by auth type -- only one type per config. Supported: `jwt` (recommended), `basic_auth`, `bearer`, `api_key`, `oauth2_client_credentials`. All tests use it automatically; individual tests opt out with `auth: false`. Values support `{{ }}` placeholders. For `jwt`, the `header` and `payload` blocks are merged on top of defaults (`{alg: HS256, typ: JWT}` / `{iat, exp}`) so only overrides need to be specified; algorithms: HS256/HS384/HS512.
 - `funcs`: custom shell commands callable as `{{ funcname() }}` placeholders
 - `tests[].nodes`: per-node overrides for `requests_per_second`, `threads`
 - Built-in placeholders: `{{ uuid() }}`, `{{ now() }}`, `{{ js('expr') }}`

@@ -4,7 +4,32 @@ funcs:
 
 # Auth configuration: only one type allowed per config file.
 # All tests use it automatically unless a test sets "auth: false".
-# Supported types: basic_auth, bearer, api_key, oauth2_client_credentials
+# Supported types (jwt is the recommended, most widely-used credential):
+#   jwt, basic_auth, bearer, api_key, oauth2_client_credentials
+#
+# ---- JWT (recommended) ---------------------------------------------
+# The "header" and "payload" blocks are merged on top of these defaults, so
+# you only need to override what you care about:
+#   header  defaults: {alg: HS256, typ: JWT}
+#   payload defaults: {iat: <now-unix>, exp: <now+ttl-unix>}  (ttl defaults to 3600s)
+# String values inside either block go through the normal placeholder
+# pipeline, so {{ uuid() }}, {{ now() }}, {{ funcname() }}, and
+# {{ js('...') }} all work. Supported algorithms: HS256, HS384, HS512.
+#
+# auth:
+#   jwt:
+#     header:
+#       alg: HS256          # override any of the defaults
+#       kid: my-key-id
+#     payload:
+#       iss: stresstool
+#       sub: load-test-user
+#       aud: my-api
+#       jti: "{{ uuid() }}"
+#     signature:
+#       secret: "{{ get_password() }}"
+#     ttl_seconds: 600       # optional; default 3600
+
 auth:
   basic_auth:
     username: "testuser"

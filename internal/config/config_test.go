@@ -55,6 +55,16 @@ func TestValidateAuth_MissingRequiredFields(t *testing.T) {
 		{"oauth2 no token_url", &AuthConfig{OAuth2ClientCredentials: &OAuth2ClientCredentialsConfig{ClientID: "c", ClientSecret: "s"}}, "token_url is required"},
 		{"oauth2 no client_id", &AuthConfig{OAuth2ClientCredentials: &OAuth2ClientCredentialsConfig{TokenURL: "u", ClientSecret: "s"}}, "client_id is required"},
 		{"oauth2 no client_secret", &AuthConfig{OAuth2ClientCredentials: &OAuth2ClientCredentialsConfig{TokenURL: "u", ClientID: "c"}}, "client_secret is required"},
+		{"jwt no signature", &AuthConfig{JWT: &JWTAuthConfig{}}, "signature is required"},
+		{"jwt no secret", &AuthConfig{JWT: &JWTAuthConfig{Signature: &JWTSignatureConfig{}}}, "signature.secret is required"},
+		{"jwt bad alg", &AuthConfig{JWT: &JWTAuthConfig{
+			Header:    map[string]string{"alg": "RS256"},
+			Signature: &JWTSignatureConfig{Secret: "s"},
+		}}, "unsupported alg"},
+		{"jwt negative ttl", &AuthConfig{JWT: &JWTAuthConfig{
+			Signature:  &JWTSignatureConfig{Secret: "s"},
+			TTLSeconds: -1,
+		}}, "ttl_seconds must be >= 0"},
 	}
 
 	for _, tc := range tests {
@@ -136,6 +146,7 @@ func TestAuthType(t *testing.T) {
 		want string
 	}{
 		{"nil", nil, ""},
+		{"jwt", &AuthConfig{JWT: &JWTAuthConfig{Signature: &JWTSignatureConfig{Secret: "s"}}}, "jwt"},
 		{"basic", &AuthConfig{BasicAuth: &BasicAuthConfig{Username: "u", Password: "p"}}, "basic_auth"},
 		{"bearer", &AuthConfig{Bearer: &BearerAuthConfig{Token: "t"}}, "bearer"},
 		{"api_key", &AuthConfig{APIKey: &APIKeyAuthConfig{Header: "h", Key: "k"}}, "api_key"},
@@ -201,6 +212,59 @@ tests:
 		t.Fatal("test2.Auth should be false")
 	}
 
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+}
+
+func TestParseYAMLJWT(t *testing.T) {
+	yaml := `
+auth:
+  jwt:
+    header:
+      alg: HS256
+      typ: JWT
+      kid: my-key
+    payload:
+      iss: stresstool
+      sub: load-test-user
+      aud: my-api
+    signature:
+      secret: super-secret
+    ttl_seconds: 600
+tests:
+  - name: t
+    path: /api
+    requests_per_second: 1
+    threads: 1
+    run_seconds: 1
+`
+	cfg, err := ParseConfig([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth == nil || cfg.Auth.JWT == nil {
+		t.Fatal("expected jwt to be parsed")
+	}
+	jwt := cfg.Auth.JWT
+	if jwt.Header["alg"] != "HS256" {
+		t.Errorf("header.alg = %v", jwt.Header["alg"])
+	}
+	if jwt.Header["kid"] != "my-key" {
+		t.Errorf("header.kid = %v", jwt.Header["kid"])
+	}
+	if jwt.Payload["iss"] != "stresstool" {
+		t.Errorf("payload.iss = %v", jwt.Payload["iss"])
+	}
+	if jwt.Signature == nil || jwt.Signature.Secret != "super-secret" {
+		t.Errorf("signature secret = %v", jwt.Signature)
+	}
+	if jwt.TTLSeconds != 600 {
+		t.Errorf("ttl_seconds = %d, want 600", jwt.TTLSeconds)
+	}
+	if cfg.Auth.AuthType() != "jwt" {
+		t.Errorf("AuthType = %q, want jwt", cfg.Auth.AuthType())
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validation failed: %v", err)
 	}
