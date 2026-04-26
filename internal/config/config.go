@@ -19,7 +19,11 @@ type Config struct {
 }
 
 // AuthConfig holds auth configuration keyed by type. Only one type may be set.
+//
+// JWT is the recommended and most widely-used credential type; it is listed
+// first so that tooling and docs surface it as the default choice.
 type AuthConfig struct {
+	JWT                     *JWTAuthConfig                 `yaml:"jwt,omitempty"`
 	BasicAuth               *BasicAuthConfig               `yaml:"basic_auth,omitempty"`
 	Bearer                  *BearerAuthConfig              `yaml:"bearer,omitempty"`
 	APIKey                  *APIKeyAuthConfig              `yaml:"api_key,omitempty"`
@@ -30,6 +34,9 @@ type AuthConfig struct {
 func (a *AuthConfig) AuthType() string {
 	if a == nil {
 		return ""
+	}
+	if a.JWT != nil {
+		return "jwt"
 	}
 	if a.BasicAuth != nil {
 		return "basic_auth"
@@ -44,6 +51,39 @@ func (a *AuthConfig) AuthType() string {
 		return "oauth2_client_credentials"
 	}
 	return ""
+}
+
+// JWTAuthConfig holds JWT (JSON Web Token) authentication configuration.
+//
+// The token is assembled from three blocks: header, payload, and signature.
+// User-provided Header and Payload values are merged on top of sensible
+// defaults, so every field can be overridden but nothing is required:
+//
+//   - Header defaults: {"alg": "HS256", "typ": "JWT"}
+//   - Payload defaults: {"iat": <now-unix>, "exp": <now+ttl-unix>}
+//
+// All values are flat string key/value pairs. Numeric claims like "exp" and
+// "iat" are coerced to JSON numbers automatically when the token is built.
+// The signing algorithm is read from Header["alg"] (supported: HS256, HS384,
+// HS512). Values are evaluated as placeholders, so dynamic claims like
+// {{ uuid() }} or {{ now() }} work the same as in other auth types.
+type JWTAuthConfig struct {
+	// Header is the JWT header key/value pairs; merged on top of the defaults.
+	Header map[string]string `yaml:"header,omitempty"`
+	// Payload is the JWT claims key/value pairs; merged on top of the defaults.
+	Payload map[string]string `yaml:"payload,omitempty"`
+	// Signature holds the signing material for the algorithm in Header["alg"].
+	Signature *JWTSignatureConfig `yaml:"signature,omitempty"`
+	// TTLSeconds is the default "exp" lifetime in seconds (default: 3600).
+	// Only used if the user does not override "exp" in Payload.
+	TTLSeconds int `yaml:"ttl_seconds,omitempty"`
+}
+
+// JWTSignatureConfig holds signing material for a JWT.
+// For HMAC algorithms (HS256/HS384/HS512), only Secret is required.
+type JWTSignatureConfig struct {
+	// Secret is the shared secret for HMAC signing algorithms.
+	Secret string `yaml:"secret,omitempty"`
 }
 
 // BasicAuthConfig holds basic authentication credentials.
@@ -79,25 +119,52 @@ type FuncDef struct {
 
 const defaultFuncTimeout = 3 * time.Second
 
-// Test defines a single HTTP stress test
+// Test defines a single HTTP stress test.
+//
+// A test either describes a single HTTP request (via Path/Method/Headers/Body/Assert
+// at the test level) or a sequence of requests via Steps. The two forms are
+// mutually exclusive. When Steps is non-empty, each worker thread runs the steps
+// sequentially on each iteration; the rate limiter gates individual step requests
+// (RequestsPerSecond is the overall HTTP request rate across all steps).
 type Test struct {
-	Name              string            `yaml:"name"`
-	Path              string            `yaml:"path"`
-	Method            string            `yaml:"method"`
-	RequestsPerSecond int               `yaml:"requests_per_second"`
-	Threads           int               `yaml:"threads"`
-	RunSeconds        int               `yaml:"run_seconds"`
-	Headers           map[string]string `yaml:"headers"`
-	Body              string            `yaml:"body"`
-	Assert            *Assertion        `yaml:"assert"`
-	Nodes             map[string]Node   `yaml:"nodes"`
-	Auth              *bool             `yaml:"auth,omitempty"` // nil=use config auth, false=disable
+	Name              string `yaml:"name"`
+	Path              string `yaml:"path,omitempty"`
+	Method            string `yaml:"method,omitempty"`
+	RequestsPerSecond int    `yaml:"requests_per_second"`
+	Threads           int    `yaml:"threads"`
+	RunSeconds        int    `yaml:"run_seconds"`
+	// WarmupSeconds is an optional ramp-up phase before the main run. During
+	// warmup the request rate increases linearly from 0 to requests_per_second,
+	// so the total test duration is WarmupSeconds + RunSeconds. Defaults to 0.
+	WarmupSeconds int               `yaml:"warmup_seconds,omitempty"`
+	Headers       map[string]string `yaml:"headers,omitempty"`
+	Body          string            `yaml:"body,omitempty"`
+	Assert        *Assertion        `yaml:"assert,omitempty"`
+	Steps         []Step            `yaml:"steps,omitempty"`
+	Nodes         map[string]Node   `yaml:"nodes"`
+	Auth          *bool             `yaml:"auth,omitempty"` // nil=use config auth, false=disable
+}
+
+// Step defines one HTTP request inside a multi-step test. Threads, rate limit
+// and run duration live on the enclosing Test; each step carries only request
+// arguments and assertions.
+type Step struct {
+	Name    string            `yaml:"name,omitempty"`
+	Path    string            `yaml:"path"`
+	Method  string            `yaml:"method,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Body    string            `yaml:"body,omitempty"`
+	Assert  *Assertion        `yaml:"assert,omitempty"`
 }
 
 // Node allows overriding settings for a specific node name
 type Node struct {
 	RequestsPerSecond int `yaml:"requests_per_second"`
 	Threads           int `yaml:"threads"`
+	// WarmupSeconds overrides the test's warmup_seconds for this node. A value
+	// of 0 means "inherit from test"; use a negative value to disable warmup
+	// for this node specifically.
+	WarmupSeconds int `yaml:"warmup_seconds,omitempty"`
 }
 
 // Assertion defines what to check in responses
@@ -111,7 +178,7 @@ type Assertion struct {
 
 // LoadConfig reads and parses a YAML configuration file
 func LoadConfig(filePath string) (*Config, error) {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304 -- file path comes from operator-supplied CLI flag
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -155,9 +222,6 @@ func (c *Config) Validate() error {
 
 	// Validate each test
 	for i, test := range c.Tests {
-		if test.Path == "" {
-			return fmt.Errorf("test[%d]: path is required", i)
-		}
 		if test.RequestsPerSecond <= 0 {
 			return fmt.Errorf("test[%d]: requests_per_second must be > 0", i)
 		}
@@ -167,15 +231,42 @@ func (c *Config) Validate() error {
 		if test.RunSeconds <= 0 {
 			return fmt.Errorf("test[%d]: run_seconds must be > 0", i)
 		}
-		if test.Method == "" {
-			c.Tests[i].Method = "GET"
+		if test.WarmupSeconds < 0 {
+			return fmt.Errorf("test[%d]: warmup_seconds must be >= 0", i)
 		}
 
-		// Check for conflict: auth defined + test uses auth + test has Authorization header
-		authEnabled := test.Auth == nil || *test.Auth
-		if hasAuth && authEnabled {
-			if _, ok := test.Headers["Authorization"]; ok {
-				return fmt.Errorf("test[%d]: cannot set Authorization header when auth is configured; use auth: false to disable", i)
+		hasSteps := len(test.Steps) > 0
+		if hasSteps {
+			if test.Path != "" || test.Method != "" || test.Body != "" || len(test.Headers) > 0 || test.Assert != nil {
+				return fmt.Errorf("test[%d]: cannot set path/method/headers/body/assert on the test when steps are defined; move them into a step", i)
+			}
+			authEnabled := test.Auth == nil || *test.Auth
+			for j := range test.Steps {
+				step := &c.Tests[i].Steps[j]
+				if step.Path == "" {
+					return fmt.Errorf("test[%d].steps[%d]: path is required", i, j)
+				}
+				if step.Method == "" {
+					step.Method = "GET"
+				}
+				if hasAuth && authEnabled {
+					if _, ok := step.Headers["Authorization"]; ok {
+						return fmt.Errorf("test[%d].steps[%d]: cannot set Authorization header when auth is configured; use auth: false to disable", i, j)
+					}
+				}
+			}
+		} else {
+			if test.Path == "" {
+				return fmt.Errorf("test[%d]: path is required", i)
+			}
+			if test.Method == "" {
+				c.Tests[i].Method = "GET"
+			}
+			authEnabled := test.Auth == nil || *test.Auth
+			if hasAuth && authEnabled {
+				if _, ok := test.Headers["Authorization"]; ok {
+					return fmt.Errorf("test[%d]: cannot set Authorization header when auth is configured; use auth: false to disable", i)
+				}
 			}
 		}
 
@@ -199,6 +290,9 @@ func (a *AuthConfig) validate() error {
 	}
 
 	count := 0
+	if a.JWT != nil {
+		count++
+	}
 	if a.BasicAuth != nil {
 		count++
 	}
@@ -220,6 +314,22 @@ func (a *AuthConfig) validate() error {
 	}
 
 	switch {
+	case a.JWT != nil:
+		if a.JWT.Signature == nil {
+			return fmt.Errorf("jwt: signature is required")
+		}
+		alg := jwtAlg(a.JWT.Header)
+		switch alg {
+		case "HS256", "HS384", "HS512":
+			if a.JWT.Signature.Secret == "" {
+				return fmt.Errorf("jwt: signature.secret is required for %s", alg)
+			}
+		default:
+			return fmt.Errorf("jwt: unsupported alg %q (supported: HS256, HS384, HS512)", alg)
+		}
+		if a.JWT.TTLSeconds < 0 {
+			return fmt.Errorf("jwt: ttl_seconds must be >= 0")
+		}
 	case a.BasicAuth != nil:
 		if a.BasicAuth.Username == "" {
 			return fmt.Errorf("basic_auth: username is required")
@@ -254,6 +364,16 @@ func (a *AuthConfig) validate() error {
 	return nil
 }
 
+// jwtAlg returns the "alg" value from a JWT header map, falling back to the
+// default HS256 when not set.
+func jwtAlg(header map[string]string) string {
+	const defaultAlg = "HS256"
+	if s, ok := header["alg"]; ok && s != "" {
+		return strings.ToUpper(s)
+	}
+	return defaultAlg
+}
+
 // GetFunc returns a function definition by name
 func (c *Config) GetFunc(name string) *FuncDef {
 	for _, f := range c.Funcs {
@@ -273,7 +393,7 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultFuncTimeout)
 	defer cancel()
 
-	// #nosec G204 -- custom function commands are intentionally user-configured via YAML funcs.
+	// #nosec G204 -- user-defined funcs from local YAML config; running arbitrary commands is the documented feature.
 	cmd := exec.CommandContext(ctx, f.Cmd[0], f.Cmd[1:]...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -303,6 +423,13 @@ func (c *Config) WithNodeOverrides(nodeName string) *Config {
 			}
 			if nodeCfg.RequestsPerSecond > 0 {
 				updated.RequestsPerSecond = nodeCfg.RequestsPerSecond
+			}
+			// A negative node-level warmup means "disable warmup here"; 0
+			// means "inherit from the test default"; positive overrides.
+			if nodeCfg.WarmupSeconds < 0 {
+				updated.WarmupSeconds = 0
+			} else if nodeCfg.WarmupSeconds > 0 {
+				updated.WarmupSeconds = nodeCfg.WarmupSeconds
 			}
 		}
 		newConfig.Tests[i] = updated

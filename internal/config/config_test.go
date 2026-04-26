@@ -57,6 +57,16 @@ func TestValidateAuth_MissingRequiredFields(t *testing.T) {
 		{"oauth2 no token_url", &AuthConfig{OAuth2ClientCredentials: &OAuth2ClientCredentialsConfig{ClientID: "c", ClientSecret: "s"}}, "token_url is required"},
 		{"oauth2 no client_id", &AuthConfig{OAuth2ClientCredentials: &OAuth2ClientCredentialsConfig{TokenURL: "u", ClientSecret: "s"}}, "client_id is required"},
 		{"oauth2 no client_secret", &AuthConfig{OAuth2ClientCredentials: &OAuth2ClientCredentialsConfig{TokenURL: "u", ClientID: "c"}}, "client_secret is required"},
+		{"jwt no signature", &AuthConfig{JWT: &JWTAuthConfig{}}, "signature is required"},
+		{"jwt no secret", &AuthConfig{JWT: &JWTAuthConfig{Signature: &JWTSignatureConfig{}}}, "signature.secret is required"},
+		{"jwt bad alg", &AuthConfig{JWT: &JWTAuthConfig{
+			Header:    map[string]string{"alg": "RS256"},
+			Signature: &JWTSignatureConfig{Secret: "s"},
+		}}, "unsupported alg"},
+		{"jwt negative ttl", &AuthConfig{JWT: &JWTAuthConfig{
+			Signature:  &JWTSignatureConfig{Secret: "s"},
+			TTLSeconds: -1,
+		}}, "ttl_seconds must be >= 0"},
 	}
 
 	for _, tc := range tests {
@@ -138,6 +148,7 @@ func TestAuthType(t *testing.T) {
 		want string
 	}{
 		{"nil", nil, ""},
+		{"jwt", &AuthConfig{JWT: &JWTAuthConfig{Signature: &JWTSignatureConfig{Secret: "s"}}}, "jwt"},
 		{"basic", &AuthConfig{BasicAuth: &BasicAuthConfig{Username: "u", Password: "p"}}, "basic_auth"},
 		{"bearer", &AuthConfig{Bearer: &BearerAuthConfig{Token: "t"}}, "bearer"},
 		{"api_key", &AuthConfig{APIKey: &APIKeyAuthConfig{Header: "h", Key: "k"}}, "api_key"},
@@ -152,6 +163,49 @@ func TestAuthType(t *testing.T) {
 				t.Fatalf("AuthType() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestValidateWarmupSecondsNegative(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Path: "/x", RequestsPerSecond: 1, Threads: 1, RunSeconds: 1, WarmupSeconds: -1,
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for negative warmup_seconds")
+	}
+	if !strings.Contains(err.Error(), "warmup_seconds") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWithNodeOverrides_Warmup(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name: "t", Path: "/x", RequestsPerSecond: 10, Threads: 2,
+			RunSeconds: 10, WarmupSeconds: 5,
+			Nodes: map[string]Node{
+				"override":    {WarmupSeconds: 15},
+				"disable":     {WarmupSeconds: -1},
+				"inherit":     {Threads: 4},
+				"disable-rps": {RequestsPerSecond: 20, WarmupSeconds: -1},
+			},
+		}},
+	}
+
+	cases := map[string]int{
+		"override":    15,
+		"disable":     0,
+		"inherit":     5,
+		"disable-rps": 0,
+	}
+	for node, want := range cases {
+		out := cfg.WithNodeOverrides(node)
+		if got := out.Tests[0].WarmupSeconds; got != want {
+			t.Errorf("node %q: WarmupSeconds = %d, want %d", node, got, want)
+		}
 	}
 }
 
@@ -247,4 +301,114 @@ func TestExecuteFunc(t *testing.T) {
 			t.Fatalf("timeout should happen around 3s, took %s", elapsed)
 		}
 	})
+}
+
+func TestParseYAMLJWT(t *testing.T) {
+	yaml := `
+auth:
+  jwt:
+    header:
+      alg: HS256
+      typ: JWT
+      kid: my-key
+    payload:
+      iss: stresstool
+      sub: load-test-user
+      aud: my-api
+    signature:
+      secret: super-secret
+    ttl_seconds: 600
+tests:
+  - name: t
+    path: /api
+    requests_per_second: 1
+    threads: 1
+    run_seconds: 1
+`
+	cfg, err := ParseConfig([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth == nil || cfg.Auth.JWT == nil {
+		t.Fatal("expected jwt to be parsed")
+	}
+	jwt := cfg.Auth.JWT
+	if jwt.Header["alg"] != "HS256" {
+		t.Errorf("header.alg = %v", jwt.Header["alg"])
+	}
+	if jwt.Header["kid"] != "my-key" {
+		t.Errorf("header.kid = %v", jwt.Header["kid"])
+	}
+	if jwt.Payload["iss"] != "stresstool" {
+		t.Errorf("payload.iss = %v", jwt.Payload["iss"])
+	}
+	if jwt.Signature == nil || jwt.Signature.Secret != "super-secret" {
+		t.Errorf("signature secret = %v", jwt.Signature)
+	}
+	if jwt.TTLSeconds != 600 {
+		t.Errorf("ttl_seconds = %d, want 600", jwt.TTLSeconds)
+	}
+	if cfg.Auth.AuthType() != "jwt" {
+		t.Errorf("AuthType = %q, want jwt", cfg.Auth.AuthType())
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+}
+
+func TestValidateSteps_OK(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name:              "flow",
+			RequestsPerSecond: 1,
+			Threads:           1,
+			RunSeconds:        1,
+			Steps: []Step{
+				{Name: "s1", Path: "/a"},
+				{Name: "s2", Path: "/b", Method: "POST"},
+			},
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tests[0].Steps[0].Method != "GET" {
+		t.Fatalf("expected default method GET on step 0, got %q", cfg.Tests[0].Steps[0].Method)
+	}
+	if cfg.Tests[0].Steps[1].Method != "POST" {
+		t.Fatalf("expected POST preserved on step 1, got %q", cfg.Tests[0].Steps[1].Method)
+	}
+}
+
+func TestValidateSteps_MutualExclusion(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name:              "flow",
+			Path:              "/top",
+			RequestsPerSecond: 1,
+			Threads:           1,
+			RunSeconds:        1,
+			Steps:             []Step{{Path: "/a"}},
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "steps are defined") {
+		t.Fatalf("expected mutual-exclusion error, got %v", err)
+	}
+}
+
+func TestValidateSteps_PathRequired(t *testing.T) {
+	cfg := &Config{
+		Tests: []Test{{
+			Name:              "flow",
+			RequestsPerSecond: 1,
+			Threads:           1,
+			RunSeconds:        1,
+			Steps:             []Step{{Name: "missing"}},
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "path is required") {
+		t.Fatalf("expected step path error, got %v", err)
+	}
 }

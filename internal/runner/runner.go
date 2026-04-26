@@ -62,7 +62,14 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	expectedTotal := test.RequestsPerSecond * test.RunSeconds
+	steps := stepsForTest(test)
+	warmupSeconds := test.WarmupSeconds
+	if warmupSeconds < 0 {
+		warmupSeconds = 0
+	}
+	// Expected total includes the main run at full RPS plus the triangular
+	// area under a linear 0→RPS ramp during warmup (≈ RPS * warmup / 2).
+	expectedTotal := test.RequestsPerSecond*test.RunSeconds + (test.RequestsPerSecond*warmupSeconds)/2
 	metrics := NewMetrics(expectedTotal)
 	assertions := NewAssertions(r.evaluator)
 	result := &TestResult{
@@ -74,11 +81,58 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 	}
 
 	startTime := time.Now()
-	endTime := startTime.Add(time.Duration(test.RunSeconds) * time.Second)
+	warmupDuration := time.Duration(warmupSeconds) * time.Second
+	runDuration := time.Duration(test.RunSeconds) * time.Second
+	endTime := startTime.Add(warmupDuration + runDuration)
 	runCtx, cancelRun := context.WithDeadline(ctx, endTime)
 	defer cancelRun()
 
-	limiter := rate.NewLimiter(rate.Limit(float64(test.RequestsPerSecond)), 1)
+	// During warmup the limiter ramps linearly from ~0 up to the target rate;
+	// after warmup it stays at the target rate. When warmup_seconds == 0 this
+	// reduces to the original steady-state behaviour.
+	targetRate := rate.Limit(float64(test.RequestsPerSecond))
+	initialRate := targetRate
+	if warmupDuration > 0 {
+		// Start at one request per warmup second so rate.Wait returns promptly
+		// but the first second is clearly lighter than the target.
+		initialRate = rate.Limit(1.0 / float64(warmupSeconds))
+	}
+	limiter := rate.NewLimiter(initialRate, 1)
+
+	// Ramp goroutine — linearly raises the limiter's rate during the warmup
+	// window. Runs only when warmup is configured.
+	var rampWg sync.WaitGroup
+	if warmupDuration > 0 {
+		rampWg.Add(1)
+		go func() {
+			defer rampWg.Done()
+			// Update roughly every 100ms, but at least 10 times across the
+			// warmup window so the ramp stays smooth on short warmups too.
+			interval := 100 * time.Millisecond
+			if warmupDuration/10 < interval {
+				interval = warmupDuration / 10
+			}
+			if interval < time.Millisecond {
+				interval = time.Millisecond
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					elapsed := time.Since(startTime)
+					if elapsed >= warmupDuration {
+						limiter.SetLimit(targetRate)
+						return
+					}
+					frac := float64(elapsed) / float64(warmupDuration)
+					limiter.SetLimit(targetRate * rate.Limit(frac))
+				}
+			}
+		}()
+	}
 
 	// Create worker pool
 	var wg sync.WaitGroup
@@ -110,16 +164,20 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 		}
 	}()
 
-	// Start workers
+	// Start workers. Each worker loops, running one step per rate-limit tick.
+	// When a test has multiple steps they are executed sequentially within the
+	// same iteration; the limiter gates every individual HTTP request.
 	for i := 0; i < test.Threads; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for {
-				if err := limiter.Wait(runCtx); err != nil {
-					return
+				for s := range steps {
+					if err := limiter.Wait(runCtx); err != nil {
+						return
+					}
+					r.executeRequest(test, &steps[s], metrics, assertions)
 				}
-				r.executeRequest(test, metrics, assertions)
 			}
 		}()
 	}
@@ -127,6 +185,7 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 	<-runCtx.Done()
 	wg.Wait()
 	progressWg.Wait() // ensure progress reporter has exited
+	rampWg.Wait()     // ensure warmup ramp goroutine has exited
 	metrics.Stop()    // drain and close the metrics channel before reading results
 
 	if errors.Is(ctx.Err(), context.Canceled) {
@@ -157,17 +216,48 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 	return result
 }
 
-// executeRequest performs a single HTTP request
-func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions *Assertions) {
+// stepsForTest returns the step sequence to execute. Single-request tests are
+// modelled as a one-element slice so the executor has a single code path.
+func stepsForTest(test *config.Test) []config.Step {
+	if len(test.Steps) > 0 {
+		return test.Steps
+	}
+	return []config.Step{{
+		Name:    test.Name,
+		Path:    test.Path,
+		Method:  test.Method,
+		Headers: test.Headers,
+		Body:    test.Body,
+		Assert:  test.Assert,
+	}}
+}
+
+// stepLabel returns the identifier used to prefix per-step error messages and
+// verbose logs so that failures can be attributed back to the step they
+// originated in.
+func stepLabel(test *config.Test, step *config.Step) string {
+	if len(test.Steps) == 0 {
+		return test.Name
+	}
+	if step.Name != "" {
+		return fmt.Sprintf("%s/%s", test.Name, step.Name)
+	}
+	return test.Name
+}
+
+// executeRequest performs a single HTTP request for one step.
+func (r *Runner) executeRequest(test *config.Test, step *config.Step, metrics *Metrics, assertions *Assertions) {
+	label := stepLabel(test, step)
+
 	// Evaluate body
-	bodyStr := test.Body
+	bodyStr := step.Body
 	if bodyStr != "" {
 		var err error
 		bodyStr, err = r.evaluator.Evaluate(bodyStr)
 		if err != nil {
 			errMsg := fmt.Sprintf("body placeholder evaluation failed: %v", err)
 			if r.verbose {
-				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+				fmt.Printf("[ERROR] %s: %s\n", label, errMsg)
 			}
 			metrics.AddRequestWithError(0, 0, false, errMsg)
 			return
@@ -180,23 +270,23 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 		bodyReader = bytes.NewReader([]byte(bodyStr))
 	}
 
-	req, err := http.NewRequest(test.Method, test.Path, bodyReader)
+	req, err := http.NewRequest(step.Method, step.Path, bodyReader)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to create request: %v", err)
 		if r.verbose {
-			fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+			fmt.Printf("[ERROR] %s: %s\n", label, errMsg)
 		}
 		metrics.AddRequestWithError(0, 0, false, errMsg)
 		return
 	}
 
 	// Evaluate and set headers
-	for key, value := range test.Headers {
+	for key, value := range step.Headers {
 		evaluatedValue, err := r.evaluator.Evaluate(value)
 		if err != nil {
 			errMsg := fmt.Sprintf("header '%s' placeholder evaluation failed: %v", key, err)
 			if r.verbose {
-				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+				fmt.Printf("[ERROR] %s: %s\n", label, errMsg)
 			}
 			metrics.AddRequestWithError(0, 0, false, errMsg)
 			return
@@ -210,7 +300,7 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 		if err != nil {
 			errMsg := fmt.Sprintf("auth resolution failed: %v", err)
 			if r.verbose {
-				fmt.Printf("[ERROR] %s: %s\n", test.Name, errMsg)
+				fmt.Printf("[ERROR] %s: %s\n", label, errMsg)
 			}
 			metrics.AddRequestWithError(0, 0, false, errMsg)
 			return
@@ -228,33 +318,33 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 	if err != nil {
 		errMsg := fmt.Sprintf("HTTP request failed: %v", err)
 		if r.verbose {
-			fmt.Printf("[ERROR] %s: %s (latency: %v)\n", test.Name, errMsg, latency.Round(time.Millisecond))
+			fmt.Printf("[ERROR] %s: %s (latency: %v)\n", label, errMsg, latency.Round(time.Millisecond))
 		}
 		metrics.AddRequestWithError(0, latency, false, errMsg)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read body for assertions; drain otherwise so the connection is reused
 	var bodyBytes []byte
-	if assertions.shouldReadBody(test.Assert) {
+	if assertions.shouldReadBody(step.Assert) {
 		bodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // Limit to 1MB
 	} else {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 	}
 
 	// Check assertions
-	passed, assertionErr := assertions.checkAssertions(test.Assert, resp.StatusCode, bodyBytes, latency)
+	passed, assertionErr := assertions.checkAssertions(step.Assert, resp.StatusCode, bodyBytes, latency)
 	if !passed && assertionErr != "" {
 		if r.verbose {
 			fmt.Printf("[ASSERTION FAILED] %s: %s (status: %d, latency: %v)\n",
-				test.Name, assertionErr, resp.StatusCode, latency.Round(time.Millisecond))
+				label, assertionErr, resp.StatusCode, latency.Round(time.Millisecond))
 		}
 		metrics.AddRequestWithError(resp.StatusCode, latency, false, assertionErr)
 	} else {
 		if r.verbose && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			fmt.Printf("[OK] %s: status=%d latency=%v\n",
-				test.Name, resp.StatusCode, latency.Round(time.Millisecond))
+				label, resp.StatusCode, latency.Round(time.Millisecond))
 		}
 		metrics.AddRequest(resp.StatusCode, latency, passed)
 	}

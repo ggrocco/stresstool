@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestRunTest_BasicGET(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "OK")
+		_, _ = fmt.Fprint(w, "OK")
 	}))
 	defer srv.Close()
 
@@ -136,7 +137,7 @@ func TestRunTest_BodyContainsAssertion_Pass(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"healthy"}`)
+		_, _ = fmt.Fprint(w, `{"status":"healthy"}`)
 	}))
 	defer srv.Close()
 
@@ -158,7 +159,7 @@ func TestRunTest_BodyContainsAssertion_Fail(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"degraded"}`)
+		_, _ = fmt.Fprint(w, `{"status":"degraded"}`)
 	}))
 	defer srv.Close()
 
@@ -384,6 +385,139 @@ func TestRunTest_ProgressUpdates(t *testing.T) {
 	}
 	if last.TestName != "progress-check" {
 		t.Errorf("expected TestName='progress-check', got %q", last.TestName)
+	}
+}
+
+func TestRunTest_Steps_ExecuteInOrder(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var observed []string
+
+	handler := func(label string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			observed = append(observed, label)
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, label)
+		}
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/a", handler("a"))
+	mux.Handle("/b", handler("b"))
+	mux.Handle("/c", handler("c"))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	r := newTestRunner(t, nil)
+	test := &config.Test{
+		Name:              "flow",
+		RequestsPerSecond: 6,
+		Threads:           1,
+		RunSeconds:        1,
+		Steps: []config.Step{
+			{Name: "a", Path: srv.URL + "/a", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+			{Name: "b", Path: srv.URL + "/b", Method: "GET", Assert: &config.Assertion{StatusCode: 200, BodyContains: "b"}},
+			{Name: "c", Path: srv.URL + "/c", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+		},
+	}
+
+	result, _ := runTest(r, test)
+
+	if !result.Passed {
+		t.Fatalf("expected steps test to pass, errors=%v", result.Errors)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(observed) < 3 {
+		t.Fatalf("expected at least 3 requests across steps, got %d: %v", len(observed), observed)
+	}
+	// Verify a-b-c ordering on the first iteration
+	for i := 0; i < 3; i++ {
+		expected := []string{"a", "b", "c"}[i]
+		if observed[i] != expected {
+			t.Errorf("step %d: expected %q, got %q (full: %v)", i, expected, observed[i], observed)
+		}
+	}
+}
+
+func TestRunTest_Steps_PerStepAssertionsAttributeErrors(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ok", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/boom", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	r := newTestRunner(t, nil)
+	test := &config.Test{
+		Name:              "flow",
+		RequestsPerSecond: 4,
+		Threads:           1,
+		RunSeconds:        1,
+		Steps: []config.Step{
+			{Name: "ok", Path: srv.URL + "/ok", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+			{Name: "boom", Path: srv.URL + "/boom", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+		},
+	}
+
+	result, _ := runTest(r, test)
+
+	if result.Passed {
+		t.Fatal("expected test to fail because second step asserts 200")
+	}
+	if result.Metrics.StatusCodes[500] == 0 {
+		t.Errorf("expected 500s from boom step to be recorded")
+	}
+	if result.Metrics.StatusCodes[200] == 0 {
+		t.Errorf("expected 200s from ok step to still be recorded")
+	}
+}
+
+func TestRunTest_Warmup_RampsUp(t *testing.T) {
+	t.Parallel()
+	var requestCount int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := newTestRunner(t, nil)
+	// 20 RPS, 2s warmup, 2s steady.
+	// Without warmup we'd expect ~80 requests (20*4). With a linear ramp
+	// during the first 2s we expect the warmup to contribute ~20 (≈20*2/2),
+	// plus ~40 from the steady phase — ≈60 total.
+	test := makeTest(srv.URL, "warmup-ramp", 20, 2, 2)
+	test.WarmupSeconds = 2
+
+	start := time.Now()
+	result, _ := runTest(r, test)
+	elapsed := time.Since(start)
+
+	count := atomic.LoadInt64(&requestCount)
+	if count == 0 {
+		t.Fatal("expected some requests during warmup + run")
+	}
+	// Upper bound: the total duration is 4s, so even at full RPS we'd expect
+	// ~80. Assert meaningfully fewer requests than the steady-state maximum
+	// over the full window, proving warmup throttled the early phase.
+	if count >= 80 {
+		t.Errorf("expected ramp-up to reduce total requests below steady-state 80, got %d", count)
+	}
+	// Sanity: the run took at least warmup + run_seconds.
+	if elapsed < 4*time.Second-200*time.Millisecond {
+		t.Errorf("test finished too early: %v", elapsed)
+	}
+	if !result.Passed {
+		t.Errorf("expected warmup test to pass")
 	}
 }
 
