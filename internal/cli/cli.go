@@ -51,8 +51,13 @@ func Run(configFile string, verbose bool, dryRun bool, parallel bool) error {
 	progressChan := make(chan runner.ProgressUpdate, 100)
 
 	for i, test := range cfg.Tests {
-		fmt.Printf("Test %d (%s): %d RPS, %d threads, %ds duration\n",
-			i+1, test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+		if test.WarmupSeconds > 0 {
+			fmt.Printf("Test %d (%s): %d RPS, %d threads, %ds duration (+%ds warmup)\n",
+				i+1, test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds, test.WarmupSeconds)
+		} else {
+			fmt.Printf("Test %d (%s): %d RPS, %d threads, %ds duration\n",
+				i+1, test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+		}
 	}
 	fmt.Println()
 
@@ -143,6 +148,9 @@ func dryRunValidation(cfg *config.Config) error {
 		fmt.Printf("  RPS: %d\n", test.RequestsPerSecond)
 		fmt.Printf("  Threads: %d\n", test.Threads)
 		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+		if test.WarmupSeconds > 0 {
+			fmt.Printf("  Warmup: %ds (ramp 0 → %d RPS)\n", test.WarmupSeconds, test.RequestsPerSecond)
+		}
 
 		if len(test.Steps) > 0 {
 			fmt.Printf("  Steps: %d\n", len(test.Steps))
@@ -243,7 +251,11 @@ func printSummary(results []*runner.TestResult) {
 		} else {
 			fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
 		}
-		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+		if test.WarmupSeconds > 0 {
+			fmt.Printf("  Duration: %ds (+%ds warmup)\n", test.RunSeconds, test.WarmupSeconds)
+		} else {
+			fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+		}
 		fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 			metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
 

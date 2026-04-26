@@ -170,7 +170,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 	var cfgYAML []byte
 
 	if configFile != "" {
-		data, err := os.ReadFile(configFile)
+		data, err := os.ReadFile(configFile) // #nosec G304 -- file path comes from operator-supplied CLI flag
 		if err != nil {
 			return fmt.Errorf("failed to read config file: %w", err)
 		}
@@ -735,7 +735,11 @@ func (c *Controller) startUIServer() {
 	mux.HandleFunc("/api/progress-series", c.handleAPIProgressSeries)
 	mux.HandleFunc("/api/logs", c.handleAPILogs)
 
-	srv := &http.Server{Addr: c.uiAddr, Handler: mux}
+	srv := &http.Server{
+		Addr:              c.uiAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	c.uiMu.Lock()
 	c.uiServer = srv
 	c.uiMu.Unlock()
@@ -1036,7 +1040,11 @@ func printTestResult(result *runner.TestResult) {
 	} else {
 		fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
 	}
-	fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+	if test.WarmupSeconds > 0 {
+		fmt.Printf("  Duration: %ds (+%ds warmup)\n", test.RunSeconds, test.WarmupSeconds)
+	} else {
+		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+	}
 	fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 		metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
 

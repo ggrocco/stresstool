@@ -87,7 +87,8 @@ terraform/{aws,gcp,azure}/      -- cloud deployment configs
 YAML-based (see `example-config.yaml`). Key features:
 - `auth`: hash keyed by auth type -- only one type per config. Supported: `jwt` (recommended), `basic_auth`, `bearer`, `api_key`, `oauth2_client_credentials`. All tests use it automatically; individual tests opt out with `auth: false`. Values support `{{ }}` placeholders. For `jwt`, the `header` and `payload` blocks are merged on top of defaults (`{alg: HS256, typ: JWT}` / `{iat, exp}`) so only overrides need to be specified; algorithms: HS256/HS384/HS512.
 - `funcs`: custom shell commands callable as `{{ funcname() }}` placeholders
-- `tests[].nodes`: per-node overrides for `requests_per_second`, `threads`
+- `tests[].nodes`: per-node overrides for `requests_per_second`, `threads`, `warmup_seconds`
+- `tests[].warmup_seconds`: optional ramp-up window added *before* `run_seconds`; the limiter's rate scales linearly from 0 to `requests_per_second` over this duration. Total run time = `warmup_seconds + run_seconds`. Node overrides may set `warmup_seconds: -1` to disable warmup for a specific node.
 - Built-in placeholders: `{{ uuid() }}`, `{{ now() }}`, `{{ js('expr') }}`
 - Assertions: `status_code`, `body_contains`, `body_equals`, `body_not_equals`, `max_latency_ms`
 

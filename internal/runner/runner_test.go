@@ -481,6 +481,46 @@ func TestRunTest_Steps_PerStepAssertionsAttributeErrors(t *testing.T) {
 	}
 }
 
+func TestRunTest_Warmup_RampsUp(t *testing.T) {
+	t.Parallel()
+	var requestCount int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := newTestRunner(t, nil)
+	// 20 RPS, 2s warmup, 2s steady.
+	// Without warmup we'd expect ~80 requests (20*4). With a linear ramp
+	// during the first 2s we expect the warmup to contribute ~20 (≈20*2/2),
+	// plus ~40 from the steady phase — ≈60 total.
+	test := makeTest(srv.URL, "warmup-ramp", 20, 2, 2)
+	test.WarmupSeconds = 2
+
+	start := time.Now()
+	result, _ := runTest(r, test)
+	elapsed := time.Since(start)
+
+	count := atomic.LoadInt64(&requestCount)
+	if count == 0 {
+		t.Fatal("expected some requests during warmup + run")
+	}
+	// Upper bound: the total duration is 4s, so even at full RPS we'd expect
+	// ~80. Assert meaningfully fewer requests than the steady-state maximum
+	// over the full window, proving warmup throttled the early phase.
+	if count >= 80 {
+		t.Errorf("expected ramp-up to reduce total requests below steady-state 80, got %d", count)
+	}
+	// Sanity: the run took at least warmup + run_seconds.
+	if elapsed < 4*time.Second-200*time.Millisecond {
+		t.Errorf("test finished too early: %v", elapsed)
+	}
+	if !result.Passed {
+		t.Errorf("expected warmup test to pass")
+	}
+}
+
 func TestRunTest_MetricsConsistency(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

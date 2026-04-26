@@ -168,6 +168,33 @@ auth:
 
 OAuth2 tokens are cached and automatically refreshed when they expire.
 
+### Warmup (Ramp-Up) Phase
+
+Add an optional `warmup_seconds` field to any test to linearly ramp the request
+rate from zero up to the configured `requests_per_second` before the main run
+begins. This lets the target system (and any autoscalers, caches, or connection
+pools) settle before full load hits.
+
+```yaml
+tests:
+  - name: api_test
+    path: "https://api.example.com/endpoint"
+    method: "GET"
+    requests_per_second: 100
+    threads: 10
+    warmup_seconds: 15   # linear ramp from 0 → 100 RPS over 15s
+    run_seconds: 60      # 60s of steady load at 100 RPS afterwards
+```
+
+Total test duration with a warmup is `warmup_seconds + run_seconds` — in the
+example above, 75 seconds total. Metrics cover the entire window, so RPS shown
+during warmup will appear lower than the target until the ramp completes. When
+`warmup_seconds` is omitted or set to `0`, the runner behaves exactly as
+before: full RPS from t=0.
+
+Node overrides may also tune warmup per node (`warmup_seconds: -1` disables
+warmup for a specific node, `0` inherits from the test default).
+
 ### Node-Specific Overrides
 
 You can configure different load parameters for specific nodes in your YAML config:

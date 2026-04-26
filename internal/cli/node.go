@@ -179,8 +179,13 @@ func (n *grpcWorker) handleTestSpec(spec *payloadpb.TestSpecMessage) {
 
 	fmt.Printf("Received test specification with %d test(s)\n", len(n.config.Tests))
 	for _, test := range n.config.Tests {
-		fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",
-			test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+		if test.WarmupSeconds > 0 {
+			fmt.Printf("  - %s: %d RPS, %d threads, %ds duration (+%ds warmup)\n",
+				test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds, test.WarmupSeconds)
+		} else {
+			fmt.Printf("  - %s: %d RPS, %d threads, %ds duration\n",
+				test.Name, test.RequestsPerSecond, test.Threads, test.RunSeconds)
+		}
 	}
 
 	if err := n.send(&payloadpb.NodeMessage{

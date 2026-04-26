@@ -63,7 +63,13 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 		ctx = context.Background()
 	}
 	steps := stepsForTest(test)
-	expectedTotal := test.RequestsPerSecond * test.RunSeconds
+	warmupSeconds := test.WarmupSeconds
+	if warmupSeconds < 0 {
+		warmupSeconds = 0
+	}
+	// Expected total includes the main run at full RPS plus the triangular
+	// area under a linear 0→RPS ramp during warmup (≈ RPS * warmup / 2).
+	expectedTotal := test.RequestsPerSecond*test.RunSeconds + (test.RequestsPerSecond*warmupSeconds)/2
 	metrics := NewMetrics(expectedTotal)
 	assertions := NewAssertions(r.evaluator)
 	result := &TestResult{
@@ -75,11 +81,58 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 	}
 
 	startTime := time.Now()
-	endTime := startTime.Add(time.Duration(test.RunSeconds) * time.Second)
+	warmupDuration := time.Duration(warmupSeconds) * time.Second
+	runDuration := time.Duration(test.RunSeconds) * time.Second
+	endTime := startTime.Add(warmupDuration + runDuration)
 	runCtx, cancelRun := context.WithDeadline(ctx, endTime)
 	defer cancelRun()
 
-	limiter := rate.NewLimiter(rate.Limit(float64(test.RequestsPerSecond)), 1)
+	// During warmup the limiter ramps linearly from ~0 up to the target rate;
+	// after warmup it stays at the target rate. When warmup_seconds == 0 this
+	// reduces to the original steady-state behaviour.
+	targetRate := rate.Limit(float64(test.RequestsPerSecond))
+	initialRate := targetRate
+	if warmupDuration > 0 {
+		// Start at one request per warmup second so rate.Wait returns promptly
+		// but the first second is clearly lighter than the target.
+		initialRate = rate.Limit(1.0 / float64(warmupSeconds))
+	}
+	limiter := rate.NewLimiter(initialRate, 1)
+
+	// Ramp goroutine — linearly raises the limiter's rate during the warmup
+	// window. Runs only when warmup is configured.
+	var rampWg sync.WaitGroup
+	if warmupDuration > 0 {
+		rampWg.Add(1)
+		go func() {
+			defer rampWg.Done()
+			// Update roughly every 100ms, but at least 10 times across the
+			// warmup window so the ramp stays smooth on short warmups too.
+			interval := 100 * time.Millisecond
+			if warmupDuration/10 < interval {
+				interval = warmupDuration / 10
+			}
+			if interval < time.Millisecond {
+				interval = time.Millisecond
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					elapsed := time.Since(startTime)
+					if elapsed >= warmupDuration {
+						limiter.SetLimit(targetRate)
+						return
+					}
+					frac := float64(elapsed) / float64(warmupDuration)
+					limiter.SetLimit(targetRate * rate.Limit(frac))
+				}
+			}
+		}()
+	}
 
 	// Create worker pool
 	var wg sync.WaitGroup
@@ -132,6 +185,7 @@ func (r *Runner) RunTest(ctx context.Context, test *config.Test, progressChan ch
 	<-runCtx.Done()
 	wg.Wait()
 	progressWg.Wait() // ensure progress reporter has exited
+	rampWg.Wait()     // ensure warmup ramp goroutine has exited
 	metrics.Stop()    // drain and close the metrics channel before reading results
 
 	if errors.Is(ctx.Err(), context.Canceled) {
