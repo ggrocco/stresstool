@@ -230,7 +230,7 @@ func (r *Resolver) fetchOAuth2Token(eval *placeholders.Evaluator) (token string,
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
+		return "", 0, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, truncateForError(body))
 	}
 
 	var tokenResp struct {
@@ -251,4 +251,15 @@ func (r *Resolver) fetchOAuth2Token(eval *placeholders.Evaluator) (token string,
 	}
 
 	return tokenResp.AccessToken, tokenResp.ExpiresIn, nil
+}
+
+// truncateForError caps a response body to a short preview so error messages
+// don't echo large upstream payloads back through logs and API responses.
+func truncateForError(body []byte) string {
+	const maxLen = 200
+	s := strings.TrimSpace(string(body))
+	if len(s) > maxLen {
+		return s[:maxLen] + "…"
+	}
+	return s
 }

@@ -3,9 +3,13 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"net"
@@ -24,6 +28,16 @@ import (
 	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
 	"stresstool/internal/runner"
 )
+
+const (
+	authCookieName = "stresstool_auth"
+	authTokenEnv   = "STRESSTOOL_WEB_TOKEN" // #nosec G101 -- env var name, not a credential
+)
+
+// loginTmpl is the parsed sign-in page. The source lives at web/login.html so
+// operators can iterate on the markup without touching Go code; html/template
+// auto-escapes substituted values to keep the error message XSS-safe.
+var loginTmpl = template.Must(template.ParseFS(webFS, "web/login.html"))
 
 //go:embed web
 var webFS embed.FS
@@ -117,6 +131,10 @@ type Controller struct {
 	completionMu sync.Mutex
 	uiMu         sync.Mutex
 	uiServer     *http.Server
+
+	// authToken gates access to the web UI and /api/* endpoints. Resolved from
+	// STRESSTOOL_WEB_TOKEN or auto-generated when the web UI is enabled.
+	authToken string
 }
 
 // NodeConnection represents a connected node (gRPC session).
@@ -185,6 +203,15 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		cfgYAML = data
 	}
 
+	var authToken string
+	if uiAddr != "" {
+		token, err := resolveWebAuthToken()
+		if err != nil {
+			return fmt.Errorf("web auth token: %w", err)
+		}
+		authToken = token
+	}
+
 	ctrl := &Controller{
 		listenAddr:     listenAddr,
 		uiAddr:         uiAddr,
@@ -194,6 +221,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 		parallel:       parallel,
 		verbose:        verbose,
 		tlsOpts:        tlsOpts,
+		authToken:      authToken,
 		eventChan:      make(chan controllerEvent, 100),
 		queryChan:      make(chan stateQuery),
 		completionChan: make(chan struct{}),
@@ -709,7 +737,10 @@ func (c *Controller) startUIServer() {
 	staticFS := http.FileServer(http.FS(webContent))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/login", c.handleLogin)
+	mux.HandleFunc("/login.css", c.handleLoginCSS)
+	mux.HandleFunc("/logout", c.handleLogout)
+	mux.HandleFunc("/", c.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -723,17 +754,17 @@ func (c *Controller) startUIServer() {
 		data, _ := io.ReadAll(f)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(data)
-	})
-	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
-	mux.HandleFunc("/api/nodes", c.handleAPINodes)
-	mux.HandleFunc("/api/start", c.handleAPIStart)
-	mux.HandleFunc("/api/stop", c.handleAPIStop)
-	mux.HandleFunc("/api/exit", c.handleAPIExit)
-	mux.HandleFunc("/api/run-status", c.handleAPIRunStatus)
-	mux.HandleFunc("/api/config", c.handleAPIConfig)
-	mux.HandleFunc("/api/results", c.handleAPIResults)
-	mux.HandleFunc("/api/progress-series", c.handleAPIProgressSeries)
-	mux.HandleFunc("/api/logs", c.handleAPILogs)
+	}))
+	mux.Handle("/static/", c.requireAuth(http.StripPrefix("/static/", staticFS).ServeHTTP))
+	mux.HandleFunc("/api/nodes", c.requireAuth(c.handleAPINodes))
+	mux.HandleFunc("/api/start", c.requireAuth(c.handleAPIStart))
+	mux.HandleFunc("/api/stop", c.requireAuth(c.handleAPIStop))
+	mux.HandleFunc("/api/exit", c.requireAuth(c.handleAPIExit))
+	mux.HandleFunc("/api/run-status", c.requireAuth(c.handleAPIRunStatus))
+	mux.HandleFunc("/api/config", c.requireAuth(c.handleAPIConfig))
+	mux.HandleFunc("/api/results", c.requireAuth(c.handleAPIResults))
+	mux.HandleFunc("/api/progress-series", c.requireAuth(c.handleAPIProgressSeries))
+	mux.HandleFunc("/api/logs", c.requireAuth(c.handleAPILogs))
 
 	srv := &http.Server{
 		Addr:              c.uiAddr,
@@ -1022,6 +1053,138 @@ func (c *Controller) handleAPILogs(w http.ResponseWriter, r *http.Request) {
 		"lines": res.lines,
 		"total": res.total,
 	})
+}
+
+// resolveWebAuthToken returns the token from STRESSTOOL_WEB_TOKEN, or generates
+// a random one and prints it to stdout so operators can log in.
+func resolveWebAuthToken() (string, error) {
+	if t := strings.TrimSpace(os.Getenv(authTokenEnv)); t != "" {
+		return t, nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generating auth token: %w", err)
+	}
+	token := hex.EncodeToString(buf)
+	fmt.Printf("Web UI auth token: %s\n  (Set %s to use a fixed token; visit /login to sign in.)\n", token, authTokenEnv)
+	return token, nil
+}
+
+// requireAuth wraps a handler so it rejects requests without a valid token.
+// Accepts the token via `Authorization: Bearer <token>` or the auth cookie.
+// Browser requests that lack credentials are redirected to /login.
+func (c *Controller) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c.authTokenValid(r) {
+			next(w, r)
+			return
+		}
+		// API and static asset requests get a bare 401; browser navigations get
+		// redirected to the login form so users can recover.
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/static/") {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="stresstool"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	}
+}
+
+// authTokenValid returns true if the request carries the expected auth token.
+// Comparisons are constant-time to avoid leaking the token via timing.
+func (c *Controller) authTokenValid(r *http.Request) bool {
+	if c.authToken == "" {
+		return false
+	}
+	expected := []byte(c.authToken)
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		if subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(h, "Bearer ")), expected) == 1 {
+			return true
+		}
+	}
+	if ck, err := r.Cookie(authCookieName); err == nil {
+		if subtle.ConstantTimeCompare([]byte(ck.Value), expected) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// handleLogin renders the sign-in form (GET) and validates a posted token (POST).
+// On success a SameSite=Strict, HttpOnly cookie is set so subsequent requests
+// from the same origin are authenticated without exposing the token to XSS.
+func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if c.authTokenValid(r) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		writeLoginPage(w, "", http.StatusOK)
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			writeLoginPage(w, "Invalid form submission.", http.StatusBadRequest)
+			return
+		}
+		submitted := r.PostForm.Get("token")
+		if submitted == "" || subtle.ConstantTimeCompare([]byte(submitted), []byte(c.authToken)) != 1 {
+			writeLoginPage(w, "Invalid token.", http.StatusUnauthorized)
+			return
+		}
+		// #nosec G124 -- Secure is set when the request arrived over TLS; the controller
+		// also accepts plain HTTP for local operator use, so we cannot hardcode Secure=true.
+		http.SetCookie(w, &http.Cookie{
+			Name:     authCookieName,
+			Value:    c.authToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   r.TLS != nil,
+		})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleLogout clears the auth cookie and redirects to the login form.
+func (c *Controller) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// #nosec G124 -- expiring cookie; Secure mirrors the login cookie which may be unset
+	// when the controller is accessed over plain HTTP for local operator use.
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil,
+	})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func writeLoginPage(w http.ResponseWriter, errMsg string, status int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.WriteHeader(status)
+	_ = loginTmpl.Execute(w, struct {
+		Error  string
+		EnvVar string
+	}{Error: errMsg, EnvVar: authTokenEnv})
+}
+
+// handleLoginCSS serves the sign-in stylesheet. It must be publicly reachable
+// so unauthenticated browsers can render /login before the user has a cookie.
+func (c *Controller) handleLoginCSS(w http.ResponseWriter, r *http.Request) {
+	data, err := fs.ReadFile(webFS, "web/login.css")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data)
 }
 
 func printTestResult(result *runner.TestResult) {

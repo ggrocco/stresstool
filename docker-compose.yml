@@ -24,6 +24,10 @@ services:
       - --web-port
       - "8091"
       - --insecure
+    environment:
+      # Fixed token so the auto-start profile (and anyone signing in via the
+      # browser during local dev) can authenticate. Override with any value.
+      STRESSTOOL_WEB_TOKEN: "${STRESSTOOL_WEB_TOKEN:-local-dev-token}"
     volumes:
       - ./docker/compose-config.yaml:/config/config.yaml:ro
     ports:
@@ -67,29 +71,32 @@ services:
       - controller
       - node-a
       - node-b
+    environment:
+      STRESSTOOL_WEB_TOKEN: "${STRESSTOOL_WEB_TOKEN:-local-dev-token}"
     command:
       - sh
       - -c
       - |
         set -e
+        AUTH="Authorization: Bearer $$STRESSTOOL_WEB_TOKEN"
         echo "Waiting for controller web UI and nodes..."
         sleep 15
         echo "POST /api/start"
-        curl -sfS -X POST "http://controller:8091/api/start"
+        curl -sfS -H "$$AUTH" -X POST "http://controller:8091/api/start"
         echo ""
         echo "Waiting for run to start..."
         i=0
-        while ! curl -sfS "http://controller:8091/api/run-status" | grep -q '"run_active":true'; do
+        while ! curl -sfS -H "$$AUTH" "http://controller:8091/api/run-status" | grep -q '"run_active":true'; do
           sleep 1
           i=$((i + 1))
           if [ "$i" -gt 120 ]; then echo "timeout waiting for run_active"; exit 1; fi
         done
         echo "Run active; waiting for completion..."
-        while curl -sfS "http://controller:8091/api/run-status" | grep -q '"run_active":true'; do
+        while curl -sfS -H "$$AUTH" "http://controller:8091/api/run-status" | grep -q '"run_active":true'; do
           sleep 2
         done
         echo "POST /api/exit"
-        curl -sfS -X POST "http://controller:8091/api/exit"
+        curl -sfS -H "$$AUTH" -X POST "http://controller:8091/api/exit"
         echo ""
         echo "Exit sent; controller is shutting down."
 

@@ -5,10 +5,26 @@ async function refreshNodes() {
     const res = await fetch('/api/nodes');
     const data = await res.json();
     const div = document.getElementById('nodes-list');
+    while (div.firstChild) div.removeChild(div.firstChild);
     if (!data.nodes || data.nodes.length === 0) {
-      div.innerHTML = '<span class="no-nodes">No nodes connected yet\u2026</span>';
+      const span = document.createElement('span');
+      span.className = 'no-nodes';
+      span.textContent = 'No nodes connected yet\u2026';
+      div.appendChild(span);
     } else {
-      div.innerHTML = data.nodes.map(n => '<div class="node">&#10003; ' + n.name + (n.addr ? ' <span class="node-addr">' + n.addr + '</span>' : '') + '</div>').join('');
+      for (const n of data.nodes) {
+        const row = document.createElement('div');
+        row.className = 'node';
+        row.appendChild(document.createTextNode('\u2713 ' + (n.name || '')));
+        if (n.addr) {
+          const addr = document.createElement('span');
+          addr.className = 'node-addr';
+          addr.textContent = n.addr;
+          row.appendChild(document.createTextNode(' '));
+          row.appendChild(addr);
+        }
+        div.appendChild(row);
+      }
     }
     await syncControlsForRunState();
   } catch(e) {

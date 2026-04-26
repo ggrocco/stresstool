@@ -41,6 +41,13 @@ docker compose up --build                              # manual Start in browser
 docker compose --profile auto-start up --build        # optional: curl POST /api/start
 ```
 
+## Web UI authentication
+
+The `--web` UI and all `/api/*` endpoints require a bearer token. On startup the
+controller either uses `STRESSTOOL_WEB_TOKEN` from the environment or generates
+a random token and prints it to the console. Sign in at `/login`, or send
+`Authorization: Bearer <token>` on API requests.
+
 ## What This Is
 
 A distributed HTTP stress testing tool in Go. Supports two modes:
