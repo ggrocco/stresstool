@@ -119,6 +119,19 @@ type FuncDef struct {
 
 const defaultFuncTimeout = 3 * time.Second
 
+// funcTimeoutEnv is the env var used to override defaultFuncTimeout. Accepts
+// any duration string parseable by time.ParseDuration (e.g. "500ms", "10s").
+const funcTimeoutEnv = "STRESSTOOL_FUNC_TIMEOUT"
+
+func funcTimeout() time.Duration {
+	if v := os.Getenv(funcTimeoutEnv); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultFuncTimeout
+}
+
 // Test defines a single HTTP stress test.
 //
 // A test either describes a single HTTP request (via Path/Method/Headers/Body/Assert
@@ -390,7 +403,8 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 		return "", fmt.Errorf("empty command")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultFuncTimeout)
+	timeout := funcTimeout()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// #nosec G204 -- user-defined funcs from local YAML config; running arbitrary commands is the documented feature.
@@ -398,7 +412,7 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("failed to execute %s: timed out after %s", f.Name, defaultFuncTimeout)
+			return "", fmt.Errorf("failed to execute %s: timed out after %s", f.Name, timeout)
 		}
 		return "", fmt.Errorf("failed to execute %s: %w", f.Name, err)
 	}

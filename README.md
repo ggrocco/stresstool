@@ -280,6 +280,17 @@ tests:
       max_latency_ms: 1000
 ```
 
+### Custom Functions
+
+Custom functions defined under `funcs:` are executed via `os/exec` and time
+out after 3 seconds by default. Override the timeout with the
+`STRESSTOOL_FUNC_TIMEOUT` environment variable, which accepts any Go
+duration (e.g. `500ms`, `10s`).
+
+```bash
+STRESSTOOL_FUNC_TIMEOUT=10s stresstool standalone --config config.yaml
+```
+
 ## Communication Protocol
 
 The controller and nodes communicate over **gRPC** using a bidirectional

@@ -301,6 +301,27 @@ func TestExecuteFunc(t *testing.T) {
 			t.Fatalf("timeout should happen around 3s, took %s", elapsed)
 		}
 	})
+
+	t.Run("env override", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("requires sleep command")
+		}
+
+		t.Setenv(funcTimeoutEnv, "200ms")
+
+		start := time.Now()
+		f := &FuncDef{
+			Name: "sleep",
+			Cmd:  []string{"sleep", "5"},
+		}
+		_, err := f.ExecuteFunc()
+		if err == nil || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("expected timeout error, got %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 1*time.Second {
+			t.Fatalf("timeout should happen around 200ms, took %s", elapsed)
+		}
+	})
 }
 
 func TestParseYAMLJWT(t *testing.T) {
