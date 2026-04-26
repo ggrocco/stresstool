@@ -114,9 +114,9 @@ type Controller struct {
 	// grpcServer is set while the distributed gRPC server runs; used for graceful shutdown.
 	grpcServer *grpc.Server
 
-	completionMu   sync.Mutex
-	uiMu           sync.Mutex
-	uiServer       *http.Server
+	completionMu sync.Mutex
+	uiMu         sync.Mutex
+	uiServer     *http.Server
 }
 
 // NodeConnection represents a connected node (gRPC session).

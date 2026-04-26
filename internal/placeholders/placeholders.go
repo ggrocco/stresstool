@@ -13,8 +13,8 @@ import (
 
 // evalRequest is sent over the eval channel to the vm owner goroutine
 type evalRequest struct {
-	jsCode  string
-	reply   chan evalReply
+	jsCode string
+	reply  chan evalReply
 }
 
 // evalReply carries the result of a JS evaluation back to the caller

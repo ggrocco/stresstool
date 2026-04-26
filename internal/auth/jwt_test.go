@@ -275,10 +275,10 @@ func TestResolveJWT_NumericCoercion(t *testing.T) {
 	r := NewResolver(&config.AuthConfig{
 		JWT: &config.JWTAuthConfig{
 			Payload: map[string]string{
-				"count":    "42",
-				"ratio":    "3.14",
-				"flag":     "true",
-				"literal":  "hello",
+				"count":   "42",
+				"ratio":   "3.14",
+				"flag":    "true",
+				"literal": "hello",
 			},
 			Signature: &config.JWTSignatureConfig{Secret: "s"},
 		},
