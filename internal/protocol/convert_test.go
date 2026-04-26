@@ -72,6 +72,52 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConfigRoundTrip_JWT(t *testing.T) {
+	cfg := &config.Config{
+		Auth: &config.AuthConfig{
+			JWT: &config.JWTAuthConfig{
+				Header: map[string]string{
+					"alg": "HS384",
+					"typ": "JWT",
+					"kid": "k1",
+				},
+				Payload: map[string]string{
+					"iss": "stresstool",
+					"sub": "loadtest",
+					"exp": "9999999999",
+				},
+				Signature:  &config.JWTSignatureConfig{Secret: "shh"},
+				TTLSeconds: 900,
+			},
+		},
+		Tests: []config.Test{{
+			Name: "t", Path: "/p", Method: "GET",
+			RequestsPerSecond: 1, Threads: 1, RunSeconds: 1,
+		}},
+	}
+	pb := ConfigToProto(cfg)
+	out, err := ConfigFromProto(pb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Auth == nil || out.Auth.JWT == nil {
+		t.Fatal("jwt round-trip: missing")
+	}
+	j := out.Auth.JWT
+	if j.Header["alg"] != "HS384" || j.Header["kid"] != "k1" {
+		t.Errorf("header round-trip: %+v", j.Header)
+	}
+	if j.Payload["iss"] != "stresstool" || j.Payload["sub"] != "loadtest" {
+		t.Errorf("payload round-trip: %+v", j.Payload)
+	}
+	if j.Signature == nil || j.Signature.Secret != "shh" {
+		t.Errorf("signature round-trip: %+v", j.Signature)
+	}
+	if j.TTLSeconds != 900 {
+		t.Errorf("ttl_seconds = %d, want 900", j.TTLSeconds)
+	}
+}
+
 func TestTestResultRoundTrip(t *testing.T) {
 	ct := &config.Test{Name: "t", Path: "/x", Method: "GET", RequestsPerSecond: 1, Threads: 1, RunSeconds: 1}
 	m := runner.NewMetricsSnapshot(3, 2, 1, 0,

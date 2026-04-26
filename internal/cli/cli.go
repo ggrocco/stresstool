@@ -112,6 +112,14 @@ func dryRunValidation(cfg *config.Config) error {
 		if authType != "" {
 			fmt.Printf("Auth: %s\n", authType)
 			switch {
+			case cfg.Auth.JWT != nil:
+				alg := "HS256"
+				if a := cfg.Auth.JWT.Header["alg"]; a != "" {
+					alg = a
+				}
+				fmt.Printf("  Alg: %s\n", alg)
+				fmt.Printf("  Header fields: %d (overrides merged on top of defaults)\n", len(cfg.Auth.JWT.Header))
+				fmt.Printf("  Payload fields: %d (overrides merged on top of defaults)\n", len(cfg.Auth.JWT.Payload))
 			case cfg.Auth.BasicAuth != nil:
 				fmt.Printf("  Username: %s\n", cfg.Auth.BasicAuth.Username)
 			case cfg.Auth.Bearer != nil:

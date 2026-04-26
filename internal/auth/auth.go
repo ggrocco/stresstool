@@ -68,6 +68,8 @@ func (r *Resolver) ResolveHeaders(eval *placeholders.Evaluator) (map[string]stri
 	}
 
 	switch {
+	case r.authCfg.JWT != nil:
+		return r.resolveJWT(eval)
 	case r.authCfg.BasicAuth != nil:
 		return r.resolveBasicAuth(eval)
 	case r.authCfg.Bearer != nil:
@@ -79,6 +81,14 @@ func (r *Resolver) ResolveHeaders(eval *placeholders.Evaluator) (map[string]stri
 	}
 
 	return nil, nil
+}
+
+func (r *Resolver) resolveJWT(eval *placeholders.Evaluator) (map[string]string, error) {
+	token, err := buildJWT(r.authCfg.JWT, eval)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"Authorization": "Bearer " + token}, nil
 }
 
 func (r *Resolver) resolveBasicAuth(eval *placeholders.Evaluator) (map[string]string, error) {

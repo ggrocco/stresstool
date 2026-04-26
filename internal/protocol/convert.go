@@ -21,6 +21,18 @@ func safeInt32(n int) int32 {
 	return int32(n)
 }
 
+// copyStringMap returns a shallow copy of a string map (nil-safe).
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 // ConfigToProto converts a config.Config to protobuf.
 func ConfigToProto(c *config.Config) *payloadpb.Config {
 	if c == nil {
@@ -191,6 +203,19 @@ func authConfigToProto(a *config.AuthConfig) *payloadpb.AuthConfig {
 			Scopes:       append([]string(nil), a.OAuth2ClientCredentials.Scopes...),
 		}
 	}
+	if a.JWT != nil {
+		jwt := &payloadpb.JWTAuthConfig{
+			Header:     copyStringMap(a.JWT.Header),
+			Payload:    copyStringMap(a.JWT.Payload),
+			TtlSeconds: safeInt32(a.JWT.TTLSeconds),
+		}
+		if a.JWT.Signature != nil {
+			jwt.Signature = &payloadpb.JWTSignatureConfig{
+				Secret: a.JWT.Signature.Secret,
+			}
+		}
+		pb.Jwt = jwt
+	}
 	return pb
 }
 
@@ -223,6 +248,19 @@ func authConfigFromProto(pb *payloadpb.AuthConfig) *config.AuthConfig {
 			ClientSecret: pb.Oauth2ClientCredentials.ClientSecret,
 			Scopes:       append([]string(nil), pb.Oauth2ClientCredentials.Scopes...),
 		}
+	}
+	if pb.Jwt != nil {
+		jwt := &config.JWTAuthConfig{
+			Header:     copyStringMap(pb.Jwt.Header),
+			Payload:    copyStringMap(pb.Jwt.Payload),
+			TTLSeconds: int(pb.Jwt.TtlSeconds),
+		}
+		if pb.Jwt.Signature != nil {
+			jwt.Signature = &config.JWTSignatureConfig{
+				Secret: pb.Jwt.Signature.Secret,
+			}
+		}
+		a.JWT = jwt
 	}
 	return a
 }

@@ -17,7 +17,11 @@ type Config struct {
 }
 
 // AuthConfig holds auth configuration keyed by type. Only one type may be set.
+//
+// JWT is the recommended and most widely-used credential type; it is listed
+// first so that tooling and docs surface it as the default choice.
 type AuthConfig struct {
+	JWT                     *JWTAuthConfig                 `yaml:"jwt,omitempty"`
 	BasicAuth               *BasicAuthConfig               `yaml:"basic_auth,omitempty"`
 	Bearer                  *BearerAuthConfig              `yaml:"bearer,omitempty"`
 	APIKey                  *APIKeyAuthConfig              `yaml:"api_key,omitempty"`
@@ -28,6 +32,9 @@ type AuthConfig struct {
 func (a *AuthConfig) AuthType() string {
 	if a == nil {
 		return ""
+	}
+	if a.JWT != nil {
+		return "jwt"
 	}
 	if a.BasicAuth != nil {
 		return "basic_auth"
@@ -42,6 +49,39 @@ func (a *AuthConfig) AuthType() string {
 		return "oauth2_client_credentials"
 	}
 	return ""
+}
+
+// JWTAuthConfig holds JWT (JSON Web Token) authentication configuration.
+//
+// The token is assembled from three blocks: header, payload, and signature.
+// User-provided Header and Payload values are merged on top of sensible
+// defaults, so every field can be overridden but nothing is required:
+//
+//   - Header defaults: {"alg": "HS256", "typ": "JWT"}
+//   - Payload defaults: {"iat": <now-unix>, "exp": <now+ttl-unix>}
+//
+// All values are flat string key/value pairs. Numeric claims like "exp" and
+// "iat" are coerced to JSON numbers automatically when the token is built.
+// The signing algorithm is read from Header["alg"] (supported: HS256, HS384,
+// HS512). Values are evaluated as placeholders, so dynamic claims like
+// {{ uuid() }} or {{ now() }} work the same as in other auth types.
+type JWTAuthConfig struct {
+	// Header is the JWT header key/value pairs; merged on top of the defaults.
+	Header map[string]string `yaml:"header,omitempty"`
+	// Payload is the JWT claims key/value pairs; merged on top of the defaults.
+	Payload map[string]string `yaml:"payload,omitempty"`
+	// Signature holds the signing material for the algorithm in Header["alg"].
+	Signature *JWTSignatureConfig `yaml:"signature,omitempty"`
+	// TTLSeconds is the default "exp" lifetime in seconds (default: 3600).
+	// Only used if the user does not override "exp" in Payload.
+	TTLSeconds int `yaml:"ttl_seconds,omitempty"`
+}
+
+// JWTSignatureConfig holds signing material for a JWT.
+// For HMAC algorithms (HS256/HS384/HS512), only Secret is required.
+type JWTSignatureConfig struct {
+	// Secret is the shared secret for HMAC signing algorithms.
+	Secret string `yaml:"secret,omitempty"`
 }
 
 // BasicAuthConfig holds basic authentication credentials.
@@ -206,6 +246,9 @@ func (a *AuthConfig) validate() error {
 	}
 
 	count := 0
+	if a.JWT != nil {
+		count++
+	}
 	if a.BasicAuth != nil {
 		count++
 	}
@@ -227,6 +270,22 @@ func (a *AuthConfig) validate() error {
 	}
 
 	switch {
+	case a.JWT != nil:
+		if a.JWT.Signature == nil {
+			return fmt.Errorf("jwt: signature is required")
+		}
+		alg := jwtAlg(a.JWT.Header)
+		switch alg {
+		case "HS256", "HS384", "HS512":
+			if a.JWT.Signature.Secret == "" {
+				return fmt.Errorf("jwt: signature.secret is required for %s", alg)
+			}
+		default:
+			return fmt.Errorf("jwt: unsupported alg %q (supported: HS256, HS384, HS512)", alg)
+		}
+		if a.JWT.TTLSeconds < 0 {
+			return fmt.Errorf("jwt: ttl_seconds must be >= 0")
+		}
 	case a.BasicAuth != nil:
 		if a.BasicAuth.Username == "" {
 			return fmt.Errorf("basic_auth: username is required")
@@ -259,6 +318,16 @@ func (a *AuthConfig) validate() error {
 	}
 
 	return nil
+}
+
+// jwtAlg returns the "alg" value from a JWT header map, falling back to the
+// default HS256 when not set.
+func jwtAlg(header map[string]string) string {
+	const defaultAlg = "HS256"
+	if s, ok := header["alg"]; ok && s != "" {
+		return strings.ToUpper(s)
+	}
+	return defaultAlg
 }
 
 // GetFunc returns a function definition by name
