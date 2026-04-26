@@ -269,14 +269,14 @@ func (r *Runner) executeRequest(test *config.Test, step *config.Step, metrics *M
 		metrics.AddRequestWithError(0, latency, false, errMsg)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read body for assertions; drain otherwise so the connection is reused
 	var bodyBytes []byte
 	if assertions.shouldReadBody(step.Assert) {
 		bodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // Limit to 1MB
 	} else {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 	}
 
 	// Check assertions

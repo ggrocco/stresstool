@@ -53,7 +53,7 @@ func RunNode(nodeName, controllerAddr string, verbose bool, tlsOpts TLSOptions) 
 	if err != nil {
 		return fmt.Errorf("connect to controller at %s: %w", controllerAddr, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := payloadpb.NewStressTestServiceClient(conn)
 	stream, err := client.Session(context.Background())

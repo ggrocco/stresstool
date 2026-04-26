@@ -64,7 +64,7 @@ func TestRunTest_BasicGET(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "OK")
+		_, _ = fmt.Fprint(w, "OK")
 	}))
 	defer srv.Close()
 
@@ -137,7 +137,7 @@ func TestRunTest_BodyContainsAssertion_Pass(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"healthy"}`)
+		_, _ = fmt.Fprint(w, `{"status":"healthy"}`)
 	}))
 	defer srv.Close()
 
@@ -159,7 +159,7 @@ func TestRunTest_BodyContainsAssertion_Fail(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"degraded"}`)
+		_, _ = fmt.Fprint(w, `{"status":"degraded"}`)
 	}))
 	defer srv.Close()
 
@@ -400,7 +400,7 @@ func TestRunTest_Steps_ExecuteInOrder(t *testing.T) {
 			observed = append(observed, label)
 			mu.Unlock()
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, label)
+			_, _ = fmt.Fprint(w, label)
 		}
 	}
 
