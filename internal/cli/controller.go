@@ -31,7 +31,7 @@ import (
 
 const (
 	authCookieName = "stresstool_auth"
-	authTokenEnv   = "STRESSTOOL_WEB_TOKEN"
+	authTokenEnv   = "STRESSTOOL_WEB_TOKEN" // #nosec G101 -- env var name, not a credential
 )
 
 // loginTmpl is the parsed sign-in page. The source lives at web/login.html so
@@ -1131,6 +1131,8 @@ func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeLoginPage(w, "Invalid token.", http.StatusUnauthorized)
 			return
 		}
+		// #nosec G124 -- Secure is set when the request arrived over TLS; the controller
+		// also accepts plain HTTP for local operator use, so we cannot hardcode Secure=true.
 		http.SetCookie(w, &http.Cookie{
 			Name:     authCookieName,
 			Value:    c.authToken,
@@ -1147,6 +1149,8 @@ func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout clears the auth cookie and redirects to the login form.
 func (c *Controller) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// #nosec G124 -- expiring cookie; Secure mirrors the login cookie which may be unset
+	// when the controller is accessed over plain HTTP for local operator use.
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
 		Value:    "",
@@ -1154,6 +1158,7 @@ func (c *Controller) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil,
 	})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -1179,7 +1184,7 @@ func (c *Controller) handleLoginCSS(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 func printTestResult(result *runner.TestResult) {
