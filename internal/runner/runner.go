@@ -287,7 +287,7 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 		metrics.AddRequestWithError(0, latency, false, errMsg)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read body for assertions; drain otherwise so the connection is reused
 	var bodyBytes []byte

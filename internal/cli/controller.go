@@ -719,7 +719,7 @@ func (c *Controller) startUIServer() {
 			http.NotFound(w, r)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		data, _ := io.ReadAll(f)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(data)
