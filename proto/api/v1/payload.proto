@@ -98,6 +98,16 @@ message Test {
   map<string, NodeOverride> nodes = 10;
   bool auth_disabled = 11;
   int32 warmup_seconds = 12;
+  repeated Step steps = 13;
+}
+
+message Step {
+  string name = 1;
+  string path = 2;
+  string method = 3;
+  map<string, string> headers = 4;
+  string body = 5;
+  Assertion assert = 6;
 }
 
 message NodeOverride {

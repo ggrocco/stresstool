@@ -115,11 +115,17 @@ type FuncDef struct {
 	Cmd  []string `yaml:"cmd"`
 }
 
-// Test defines a single HTTP stress test
+// Test defines a single HTTP stress test.
+//
+// A test either describes a single HTTP request (via Path/Method/Headers/Body/Assert
+// at the test level) or a sequence of requests via Steps. The two forms are
+// mutually exclusive. When Steps is non-empty, each worker thread runs the steps
+// sequentially on each iteration; the rate limiter gates individual step requests
+// (RequestsPerSecond is the overall HTTP request rate across all steps).
 type Test struct {
 	Name              string `yaml:"name"`
-	Path              string `yaml:"path"`
-	Method            string `yaml:"method"`
+	Path              string `yaml:"path,omitempty"`
+	Method            string `yaml:"method,omitempty"`
 	RequestsPerSecond int    `yaml:"requests_per_second"`
 	Threads           int    `yaml:"threads"`
 	RunSeconds        int    `yaml:"run_seconds"`
@@ -127,11 +133,24 @@ type Test struct {
 	// warmup the request rate increases linearly from 0 to requests_per_second,
 	// so the total test duration is WarmupSeconds + RunSeconds. Defaults to 0.
 	WarmupSeconds int               `yaml:"warmup_seconds,omitempty"`
-	Headers       map[string]string `yaml:"headers"`
-	Body          string            `yaml:"body"`
-	Assert        *Assertion        `yaml:"assert"`
+	Headers       map[string]string `yaml:"headers,omitempty"`
+	Body          string            `yaml:"body,omitempty"`
+	Assert        *Assertion        `yaml:"assert,omitempty"`
+	Steps         []Step            `yaml:"steps,omitempty"`
 	Nodes         map[string]Node   `yaml:"nodes"`
 	Auth          *bool             `yaml:"auth,omitempty"` // nil=use config auth, false=disable
+}
+
+// Step defines one HTTP request inside a multi-step test. Threads, rate limit
+// and run duration live on the enclosing Test; each step carries only request
+// arguments and assertions.
+type Step struct {
+	Name    string            `yaml:"name,omitempty"`
+	Path    string            `yaml:"path"`
+	Method  string            `yaml:"method,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Body    string            `yaml:"body,omitempty"`
+	Assert  *Assertion        `yaml:"assert,omitempty"`
 }
 
 // Node allows overriding settings for a specific node name
@@ -199,9 +218,6 @@ func (c *Config) Validate() error {
 
 	// Validate each test
 	for i, test := range c.Tests {
-		if test.Path == "" {
-			return fmt.Errorf("test[%d]: path is required", i)
-		}
 		if test.RequestsPerSecond <= 0 {
 			return fmt.Errorf("test[%d]: requests_per_second must be > 0", i)
 		}
@@ -214,15 +230,39 @@ func (c *Config) Validate() error {
 		if test.WarmupSeconds < 0 {
 			return fmt.Errorf("test[%d]: warmup_seconds must be >= 0", i)
 		}
-		if test.Method == "" {
-			c.Tests[i].Method = "GET"
-		}
 
-		// Check for conflict: auth defined + test uses auth + test has Authorization header
-		authEnabled := test.Auth == nil || *test.Auth
-		if hasAuth && authEnabled {
-			if _, ok := test.Headers["Authorization"]; ok {
-				return fmt.Errorf("test[%d]: cannot set Authorization header when auth is configured; use auth: false to disable", i)
+		hasSteps := len(test.Steps) > 0
+		if hasSteps {
+			if test.Path != "" || test.Method != "" || test.Body != "" || len(test.Headers) > 0 || test.Assert != nil {
+				return fmt.Errorf("test[%d]: cannot set path/method/headers/body/assert on the test when steps are defined; move them into a step", i)
+			}
+			authEnabled := test.Auth == nil || *test.Auth
+			for j := range test.Steps {
+				step := &c.Tests[i].Steps[j]
+				if step.Path == "" {
+					return fmt.Errorf("test[%d].steps[%d]: path is required", i, j)
+				}
+				if step.Method == "" {
+					step.Method = "GET"
+				}
+				if hasAuth && authEnabled {
+					if _, ok := step.Headers["Authorization"]; ok {
+						return fmt.Errorf("test[%d].steps[%d]: cannot set Authorization header when auth is configured; use auth: false to disable", i, j)
+					}
+				}
+			}
+		} else {
+			if test.Path == "" {
+				return fmt.Errorf("test[%d]: path is required", i)
+			}
+			if test.Method == "" {
+				c.Tests[i].Method = "GET"
+			}
+			authEnabled := test.Auth == nil || *test.Auth
+			if hasAuth && authEnabled {
+				if _, ok := test.Headers["Authorization"]; ok {
+					return fmt.Errorf("test[%d]: cannot set Authorization header when auth is configured; use auth: false to disable", i)
+				}
 			}
 		}
 

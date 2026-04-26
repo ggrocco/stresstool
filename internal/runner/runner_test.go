@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -384,6 +385,99 @@ func TestRunTest_ProgressUpdates(t *testing.T) {
 	}
 	if last.TestName != "progress-check" {
 		t.Errorf("expected TestName='progress-check', got %q", last.TestName)
+	}
+}
+
+func TestRunTest_Steps_ExecuteInOrder(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var observed []string
+
+	handler := func(label string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			observed = append(observed, label)
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, label)
+		}
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/a", handler("a"))
+	mux.Handle("/b", handler("b"))
+	mux.Handle("/c", handler("c"))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	r := newTestRunner(t, nil)
+	test := &config.Test{
+		Name:              "flow",
+		RequestsPerSecond: 6,
+		Threads:           1,
+		RunSeconds:        1,
+		Steps: []config.Step{
+			{Name: "a", Path: srv.URL + "/a", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+			{Name: "b", Path: srv.URL + "/b", Method: "GET", Assert: &config.Assertion{StatusCode: 200, BodyContains: "b"}},
+			{Name: "c", Path: srv.URL + "/c", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+		},
+	}
+
+	result, _ := runTest(r, test)
+
+	if !result.Passed {
+		t.Fatalf("expected steps test to pass, errors=%v", result.Errors)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(observed) < 3 {
+		t.Fatalf("expected at least 3 requests across steps, got %d: %v", len(observed), observed)
+	}
+	// Verify a-b-c ordering on the first iteration
+	for i := 0; i < 3; i++ {
+		expected := []string{"a", "b", "c"}[i]
+		if observed[i] != expected {
+			t.Errorf("step %d: expected %q, got %q (full: %v)", i, expected, observed[i], observed)
+		}
+	}
+}
+
+func TestRunTest_Steps_PerStepAssertionsAttributeErrors(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ok", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/boom", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	r := newTestRunner(t, nil)
+	test := &config.Test{
+		Name:              "flow",
+		RequestsPerSecond: 4,
+		Threads:           1,
+		RunSeconds:        1,
+		Steps: []config.Step{
+			{Name: "ok", Path: srv.URL + "/ok", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+			{Name: "boom", Path: srv.URL + "/boom", Method: "GET", Assert: &config.Assertion{StatusCode: 200}},
+		},
+	}
+
+	result, _ := runTest(r, test)
+
+	if result.Passed {
+		t.Fatal("expected test to fail because second step asserts 200")
+	}
+	if result.Metrics.StatusCodes[500] == 0 {
+		t.Errorf("expected 500s from boom step to be recorded")
+	}
+	if result.Metrics.StatusCodes[200] == 0 {
+		t.Errorf("expected 200s from ok step to still be recorded")
 	}
 }
 
