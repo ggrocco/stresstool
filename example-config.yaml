@@ -4,7 +4,32 @@ funcs:
 
 # Auth configuration: only one type allowed per config file.
 # All tests use it automatically unless a test sets "auth: false".
-# Supported types: basic_auth, bearer, api_key, oauth2_client_credentials
+# Supported types (jwt is the recommended, most widely-used credential):
+#   jwt, basic_auth, bearer, api_key, oauth2_client_credentials
+#
+# ---- JWT (recommended) ---------------------------------------------
+# The "header" and "payload" blocks are merged on top of these defaults, so
+# you only need to override what you care about:
+#   header  defaults: {alg: HS256, typ: JWT}
+#   payload defaults: {iat: <now-unix>, exp: <now+ttl-unix>}  (ttl defaults to 3600s)
+# String values inside either block go through the normal placeholder
+# pipeline, so {{ uuid() }}, {{ now() }}, {{ funcname() }}, and
+# {{ js('...') }} all work. Supported algorithms: HS256, HS384, HS512.
+#
+# auth:
+#   jwt:
+#     header:
+#       alg: HS256          # override any of the defaults
+#       kid: my-key-id
+#     payload:
+#       iss: stresstool
+#       sub: load-test-user
+#       aud: my-api
+#       jti: "{{ uuid() }}"
+#     signature:
+#       secret: "{{ get_password() }}"
+#     ttl_seconds: 600       # optional; default 3600
+
 auth:
   basic_auth:
     username: "testuser"
@@ -17,6 +42,9 @@ tests:
     requests_per_second: 5
     threads: 2
     run_seconds: 10
+    # Optional: linearly ramp requests_per_second from 0 → 5 over this many
+    # seconds before the main run begins. Total duration here = 3 + 10 = 13s.
+    warmup_seconds: 3
 
     # Auth headers (Authorization: Basic ...) are added automatically.
     headers:
@@ -57,4 +85,48 @@ tests:
     assert:
       status_code: 200
       max_latency_ms: 1000
+
+  # Multi-step test: each worker runs the steps sequentially, then loops.
+  # threads, requests_per_second and run_seconds apply to the whole test.
+  # requests_per_second gates individual step requests (5 rps with 3 steps
+  # means ~1.67 full iterations/sec, 5 HTTP requests/sec total).
+  # Per-step path/method/headers/body/assert replace the test-level fields,
+  # which cannot be combined with `steps`.
+  - name: api_checkout_flow
+    auth: false
+    requests_per_second: 5
+    threads: 2
+    run_seconds: 10
+
+    steps:
+      - name: list_products
+        path: "https://httpbin.org/get"
+        method: "GET"
+        headers:
+          X-Request-Id: "{{ uuid() }}"
+        assert:
+          status_code: 200
+          max_latency_ms: 1500
+
+      - name: create_cart
+        path: "https://httpbin.org/post"
+        method: "POST"
+        headers:
+          Content-Type: "application/json"
+        body: >
+          { "items": ["sku-1", "sku-2"], "ts": "{{ now() }}" }
+        assert:
+          status_code: 200
+          body_contains: "items"
+
+      - name: checkout
+        path: "https://httpbin.org/post"
+        method: "POST"
+        headers:
+          Content-Type: "application/json"
+        body: >
+          { "payment": "card", "ts": "{{ now() }}" }
+        assert:
+          status_code: 200
+          max_latency_ms: 2000
 

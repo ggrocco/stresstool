@@ -102,7 +102,7 @@ func TestResolveOAuth2(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": "oauth-token-abc",
 			"expires_in":   3600,
 			"token_type":   "Bearer",
@@ -138,7 +138,7 @@ func TestResolveOAuth2_CachedToken(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": fmt.Sprintf("token-%d", callCount),
 			"expires_in":   3600,
 			"token_type":   "Bearer",
@@ -225,7 +225,7 @@ func TestResolveWithPlaceholders(t *testing.T) {
 func TestResolveOAuth2_Error(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("invalid_client"))
+		_, _ = w.Write([]byte("invalid_client"))
 	}))
 	defer ts.Close()
 

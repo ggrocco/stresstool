@@ -128,9 +128,9 @@ type Controller struct {
 	// grpcServer is set while the distributed gRPC server runs; used for graceful shutdown.
 	grpcServer *grpc.Server
 
-	completionMu   sync.Mutex
-	uiMu           sync.Mutex
-	uiServer       *http.Server
+	completionMu sync.Mutex
+	uiMu         sync.Mutex
+	uiServer     *http.Server
 
 	// authToken gates access to the web UI and /api/* endpoints. Resolved from
 	// STRESSTOOL_WEB_TOKEN or auto-generated when the web UI is enabled.
@@ -188,7 +188,7 @@ func RunController(listenAddr, configFile, uiAddr string, parallel, verbose bool
 	var cfgYAML []byte
 
 	if configFile != "" {
-		data, err := os.ReadFile(configFile)
+		data, err := os.ReadFile(configFile) // #nosec G304 -- file path comes from operator-supplied CLI flag
 		if err != nil {
 			return fmt.Errorf("failed to read config file: %w", err)
 		}
@@ -750,10 +750,10 @@ func (c *Controller) startUIServer() {
 			http.NotFound(w, r)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		data, _ := io.ReadAll(f)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		_, _ = w.Write(data)
 	}))
 	mux.Handle("/static/", c.requireAuth(http.StripPrefix("/static/", staticFS).ServeHTTP))
 	mux.HandleFunc("/api/nodes", c.requireAuth(c.handleAPINodes))
@@ -766,7 +766,11 @@ func (c *Controller) startUIServer() {
 	mux.HandleFunc("/api/progress-series", c.requireAuth(c.handleAPIProgressSeries))
 	mux.HandleFunc("/api/logs", c.requireAuth(c.handleAPILogs))
 
-	srv := &http.Server{Addr: c.uiAddr, Handler: mux}
+	srv := &http.Server{
+		Addr:              c.uiAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	c.uiMu.Lock()
 	c.uiServer = srv
 	c.uiMu.Unlock()
@@ -804,7 +808,7 @@ func (c *Controller) handleAPINodes(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"nodes": infos})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"nodes": infos})
 }
 
 func (c *Controller) handleAPIStop(w http.ResponseWriter, r *http.Request) {
@@ -825,7 +829,7 @@ func (c *Controller) handleAPIStop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "nodes": len(nodes)})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "nodes": len(nodes)})
 }
 
 func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
@@ -836,7 +840,7 @@ func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
 	if atomic.LoadInt32(&c.runActive) != 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "tests already running"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "tests already running"})
 		return
 	}
 	c.configMu.RLock()
@@ -845,17 +849,17 @@ func (c *Controller) handleAPIStart(w http.ResponseWriter, r *http.Request) {
 	if !hasConfig {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no config loaded — save a config first"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no config loaded — save a config first"})
 		return
 	}
 	select {
 	case c.triggerChan <- struct{}{}:
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "start already triggered or tests already running"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "start already triggered or tests already running"})
 	}
 }
 
@@ -866,7 +870,7 @@ func (c *Controller) handleAPIRunStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	active := atomic.LoadInt32(&c.runActive) != 0
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"run_active": active})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"run_active": active})
 }
 
 func (c *Controller) handleAPIResults(w http.ResponseWriter, r *http.Request) {
@@ -929,7 +933,7 @@ func (c *Controller) handleAPIResults(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"results": out})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"results": out})
 }
 
 func (c *Controller) handleAPIProgressSeries(w http.ResponseWriter, r *http.Request) {
@@ -965,7 +969,7 @@ func (c *Controller) handleAPIProgressSeries(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"series": out})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"series": out})
 }
 
 func (c *Controller) handleAPIExit(w http.ResponseWriter, r *http.Request) {
@@ -974,7 +978,7 @@ func (c *Controller) handleAPIExit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 	go func() {
 		select {
 		case c.exitChan <- struct{}{}:
@@ -991,33 +995,33 @@ func (c *Controller) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		c.configMu.RUnlock()
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if data != nil {
-			w.Write(data)
+			_, _ = w.Write(data)
 		}
 	case http.MethodPost:
 		if atomic.LoadInt32(&c.runActive) != 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "cannot update config while tests are running"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "cannot update config while tests are running"})
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "failed to read body"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "failed to read body"})
 			return
 		}
 		cfg, err := config.ParseConfig(body)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
 			return
 		}
 		if err := cfg.Validate(); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
 			return
 		}
 		c.configMu.Lock()
@@ -1026,7 +1030,7 @@ func (c *Controller) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		c.configMu.Unlock()
 		c.log("Config updated via web UI (%d test(s))", len(cfg.Tests))
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "tests": len(cfg.Tests)})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "tests": len(cfg.Tests)})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -1039,13 +1043,13 @@ func (c *Controller) handleAPILogs(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := 0
 	if v := r.URL.Query().Get("offset"); v != "" {
-		fmt.Sscanf(v, "%d", &offset)
+		_, _ = fmt.Sscanf(v, "%d", &offset)
 	}
 	reply := make(chan logQueryReply, 1)
 	c.logQueryChan <- logQuery{offset: offset, replyChan: reply}
 	res := <-reply
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"lines": res.lines,
 		"total": res.total,
 	})
@@ -1182,8 +1186,23 @@ func printTestResult(result *runner.TestResult) {
 	test := result.Test
 	metrics := result.Metrics
 
-	fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
-	fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+	if len(test.Steps) > 0 {
+		fmt.Printf("  Steps: %d (sequential per iteration)\n", len(test.Steps))
+		for j, step := range test.Steps {
+			label := step.Name
+			if label == "" {
+				label = fmt.Sprintf("step-%d", j+1)
+			}
+			fmt.Printf("    %d. %s %s %s\n", j+1, label, step.Method, step.Path)
+		}
+	} else {
+		fmt.Printf("  Path: %s %s\n", test.Method, test.Path)
+	}
+	if test.WarmupSeconds > 0 {
+		fmt.Printf("  Duration: %ds (+%ds warmup)\n", test.RunSeconds, test.WarmupSeconds)
+	} else {
+		fmt.Printf("  Duration: %ds\n", test.RunSeconds)
+	}
 	fmt.Printf("  Requests: %d total, %d success, %d failures\n",
 		metrics.TotalRequests, metrics.SuccessCount, metrics.FailureCount)
 
