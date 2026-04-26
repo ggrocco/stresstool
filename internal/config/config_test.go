@@ -1,8 +1,10 @@
 package config
 
 import (
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateAuth_SingleType(t *testing.T) {
@@ -258,6 +260,68 @@ tests:
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validation failed: %v", err)
 	}
+}
+
+func TestExecuteFunc(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		f := &FuncDef{
+			Name: "echo",
+			Cmd:  []string{"echo", "-n", "ok"},
+		}
+		got, err := f.ExecuteFunc()
+		if err != nil {
+			t.Fatalf("ExecuteFunc() error = %v", err)
+		}
+		if got != "ok" {
+			t.Fatalf("ExecuteFunc() = %q, want ok", got)
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping timeout test in short mode")
+		}
+		if runtime.GOOS == "windows" {
+			t.Skip("requires sleep command")
+		}
+
+		start := time.Now()
+		f := &FuncDef{
+			Name: "sleep",
+			Cmd:  []string{"sleep", "5"},
+		}
+		_, err := f.ExecuteFunc()
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+		if !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 4*time.Second {
+			t.Fatalf("timeout should happen around 3s, took %s", elapsed)
+		}
+	})
+
+	t.Run("env override", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("requires sleep command")
+		}
+
+		t.Setenv(funcTimeoutEnv, "200ms")
+
+		start := time.Now()
+		f := &FuncDef{
+			Name: "sleep",
+			Cmd:  []string{"sleep", "5"},
+		}
+		_, err := f.ExecuteFunc()
+		if err == nil || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("expected timeout error, got %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 1*time.Second {
+			t.Fatalf("timeout should happen around 200ms, took %s", elapsed)
+		}
+	})
 }
 
 func TestParseYAMLJWT(t *testing.T) {
