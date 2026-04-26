@@ -19,9 +19,9 @@ type Config struct {
 // AuthConfig holds auth configuration keyed by type. Only one type may be set.
 type AuthConfig struct {
 	BasicAuth               *BasicAuthConfig               `yaml:"basic_auth,omitempty"`
-	Bearer                  *BearerAuthConfig               `yaml:"bearer,omitempty"`
-	APIKey                  *APIKeyAuthConfig                `yaml:"api_key,omitempty"`
-	OAuth2ClientCredentials *OAuth2ClientCredentialsConfig   `yaml:"oauth2_client_credentials,omitempty"`
+	Bearer                  *BearerAuthConfig              `yaml:"bearer,omitempty"`
+	APIKey                  *APIKeyAuthConfig              `yaml:"api_key,omitempty"`
+	OAuth2ClientCredentials *OAuth2ClientCredentialsConfig `yaml:"oauth2_client_credentials,omitempty"`
 }
 
 // AuthType returns which auth type is configured, or "" if none.
@@ -77,12 +77,12 @@ type FuncDef struct {
 
 // Test defines a single HTTP stress test
 type Test struct {
-	Name              string            `yaml:"name"`
-	Path              string            `yaml:"path"`
-	Method            string            `yaml:"method"`
-	RequestsPerSecond int               `yaml:"requests_per_second"`
-	Threads           int               `yaml:"threads"`
-	RunSeconds        int               `yaml:"run_seconds"`
+	Name              string `yaml:"name"`
+	Path              string `yaml:"path"`
+	Method            string `yaml:"method"`
+	RequestsPerSecond int    `yaml:"requests_per_second"`
+	Threads           int    `yaml:"threads"`
+	RunSeconds        int    `yaml:"run_seconds"`
 	// WarmupSeconds is an optional ramp-up phase before the main run. During
 	// warmup the request rate increases linearly from 0 to requests_per_second,
 	// so the total test duration is WarmupSeconds + RunSeconds. Defaults to 0.
@@ -115,7 +115,7 @@ type Assertion struct {
 
 // LoadConfig reads and parses a YAML configuration file
 func LoadConfig(filePath string) (*Config, error) {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304 -- file path comes from operator-supplied CLI flag
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -277,7 +277,7 @@ func (f *FuncDef) ExecuteFunc() (string, error) {
 		return "", fmt.Errorf("empty command")
 	}
 
-	cmd := exec.Command(f.Cmd[0], f.Cmd[1:]...)
+	cmd := exec.Command(f.Cmd[0], f.Cmd[1:]...) // #nosec G204 -- user-defined funcs from local YAML config; running arbitrary commands is the documented feature
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to execute %s: %w", f.Name, err)

@@ -294,7 +294,7 @@ func (r *Runner) executeRequest(test *config.Test, metrics *Metrics, assertions 
 	if assertions.shouldReadBody(test.Assert) {
 		bodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // Limit to 1MB
 	} else {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 	}
 
 	// Check assertions

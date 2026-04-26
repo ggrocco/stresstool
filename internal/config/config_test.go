@@ -174,10 +174,10 @@ func TestWithNodeOverrides_Warmup(t *testing.T) {
 			Name: "t", Path: "/x", RequestsPerSecond: 10, Threads: 2,
 			RunSeconds: 10, WarmupSeconds: 5,
 			Nodes: map[string]Node{
-				"override":      {WarmupSeconds: 15},
-				"disable":       {WarmupSeconds: -1},
-				"inherit":       {Threads: 4},
-				"disable-rps":   {RequestsPerSecond: 20, WarmupSeconds: -1},
+				"override":    {WarmupSeconds: 15},
+				"disable":     {WarmupSeconds: -1},
+				"inherit":     {Threads: 4},
+				"disable-rps": {RequestsPerSecond: 20, WarmupSeconds: -1},
 			},
 		}},
 	}

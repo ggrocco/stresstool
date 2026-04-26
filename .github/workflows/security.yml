@@ -39,7 +39,7 @@ jobs:
       - name: Run gosec
         uses: securego/gosec@master
         with:
-          args: ./...
+          args: -exclude-generated ./...
 
   trivy:
     name: Dependency Scan

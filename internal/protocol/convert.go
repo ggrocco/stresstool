@@ -2,12 +2,24 @@ package protocol
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"stresstool/internal/config"
 	payloadpb "stresstool/internal/protocol/payloadpb/api/v1"
 	"stresstool/internal/runner"
 )
+
+// safeInt32 clamps an int to the int32 range to avoid silent overflow.
+func safeInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
+}
 
 // ConfigToProto converts a config.Config to protobuf.
 func ConfigToProto(c *config.Config) *payloadpb.Config {
@@ -39,10 +51,10 @@ func testToProto(t *config.Test) *payloadpb.Test {
 		Name:              t.Name,
 		Path:              t.Path,
 		Method:            t.Method,
-		RequestsPerSecond: int32(t.RequestsPerSecond),
-		Threads:           int32(t.Threads),
-		RunSeconds:        int32(t.RunSeconds),
-		WarmupSeconds:     int32(t.WarmupSeconds),
+		RequestsPerSecond: safeInt32(t.RequestsPerSecond),
+		Threads:           safeInt32(t.Threads),
+		RunSeconds:        safeInt32(t.RunSeconds),
+		WarmupSeconds:     safeInt32(t.WarmupSeconds),
 		Headers:           map[string]string{},
 		Body:              t.Body,
 		Nodes:             map[string]*payloadpb.NodeOverride{},
@@ -52,11 +64,11 @@ func testToProto(t *config.Test) *payloadpb.Test {
 	}
 	if t.Assert != nil {
 		pb.Assert = &payloadpb.Assertion{
-			StatusCode:    int32(t.Assert.StatusCode),
+			StatusCode:    safeInt32(t.Assert.StatusCode),
 			BodyContains:  t.Assert.BodyContains,
 			BodyEquals:    t.Assert.BodyEquals,
 			BodyNotEquals: t.Assert.BodyNotEquals,
-			MaxLatencyMs:  int32(t.Assert.MaxLatencyMs),
+			MaxLatencyMs:  safeInt32(t.Assert.MaxLatencyMs),
 		}
 	}
 	if t.Auth != nil && !*t.Auth {
@@ -64,9 +76,9 @@ func testToProto(t *config.Test) *payloadpb.Test {
 	}
 	for name, n := range t.Nodes {
 		pb.Nodes[name] = &payloadpb.NodeOverride{
-			RequestsPerSecond: int32(n.RequestsPerSecond),
-			Threads:           int32(n.Threads),
-			WarmupSeconds:     int32(n.WarmupSeconds),
+			RequestsPerSecond: safeInt32(n.RequestsPerSecond),
+			Threads:           safeInt32(n.Threads),
+			WarmupSeconds:     safeInt32(n.WarmupSeconds),
 		}
 	}
 	return pb
@@ -250,7 +262,7 @@ func metricsToProto(m *runner.Metrics) *payloadpb.Metrics {
 		pb.LatenciesNanos = append(pb.LatenciesNanos, d.Nanoseconds())
 	}
 	for code, n := range m.StatusCodes {
-		pb.StatusCodes[int32(code)] = n
+		pb.StatusCodes[safeInt32(code)] = n
 	}
 	for msg, n := range m.Errors {
 		pb.Errors[msg] = n
